@@ -92,10 +92,10 @@ Logic that doesn't need the VS Code API is validated with node scripts that use 
 
 ```powershell
 # stub VS Code (harness base) — lives in the temp dev folder, alongside the scripts:
-$env:NODE_PATH = "C:\Users\<TU USUARIO>\AppData\Local\Temp\opencode\vscode-stub\node_modules"
-node sim-opcode-format.cjs   # formato SBL de opcodes (17 PASS)
-node sim-reserved-diag.cjs   # palabras reservadas (7 PASS)
-node sim-camera-merge.js     # merge de cámaras (imprime puntos merged + "valid: true")
+$env:NODE_PATH = "C:\Users\<YOUR USER>\AppData\Local\Temp\opencode\vscode-stub\node_modules"
+node sim-opcode-format.cjs   # SBL opcode format (17 PASS)
+node sim-reserved-diag.cjs   # reserved words (7 PASS)
+node sim-camera-merge.js     # camera merge (prints merged points + “valid: true”)
 ```
 
 > Run them from wherever the harnesses are copied (they reference the real SB4
