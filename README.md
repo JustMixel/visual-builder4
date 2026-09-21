@@ -2,7 +2,7 @@
 
 ### This is a fork of [sb4-vscode](https://github.com/NoPressF/sb4-vscode) by EOS(NoPressF)
 
-<img width="1280" height="720" alt="logoPNG" src="https://github.com/user-attachments/assets/7fa8e4e5-7522-4d58-94c1-87fa8b196148" />
+<img width="800" height="300" alt="VisualBuilder4Logo" src="https://github.com/user-attachments/assets/7fa8e4e5-7522-4d58-94c1-87fa8b196148" />
 
 ## Description
 
