@@ -1,5 +1,5 @@
 import { CommandManager, HtmlFormatColorManager } from '@managers';
-import { Command, CommandArgs, CommandIO, CommandType, Singleton, VAR_NOTATIONS } from '@utils';
+import { Command, CommandArgs, CommandIO, CommandType, Singleton } from '@utils';
 
 export class CommandFormatterProvider extends Singleton {
 	private commandManager: CommandManager = CommandManager.getInstance();
@@ -51,21 +51,21 @@ export class CommandFormatterProvider extends Singleton {
 	}
 
 	private formatOpcodeCommand(id: string, command: Command, commandIO: CommandIO): string {
-		const address = this.htmlFormatColorManager.getOpcodeAddress(id + ":");
-		const output = commandIO.output;
+		const address = this.htmlFormatColorManager.getOpcodeAddress(`{${id}:}`);
+		const output = (commandIO.output ?? '').trimEnd();
 		const name = this.htmlFormatColorManager.getOpcodeName(command.name);
 		const input = commandIO.input;
 
-		return `${address} ${output} ${name} ${input}`;
+		return [address, output, name, input].filter(Boolean).join(' ');
 	}
 
 	public formatClassCommand(command: Command, commandIO: CommandIO): string {
-		const output = commandIO.output;
+		const output = (commandIO.output ?? '').trimEnd();
 		const commandClass = this.htmlFormatColorManager.getOpcodeClassName(command.class);
 		const commandMember = this.htmlFormatColorManager.getOpcodeName(command.member);
 		const input = commandIO.input;
 
-		return `${output} ${commandClass}.${commandMember}${input}`;
+		return [output, `${commandClass}.${commandMember}${input}`].filter(Boolean).join(' ');
 	}
 
 	private formatCommandArgs(commandType: CommandType, input?: CommandArgs[], output?: CommandArgs[]): CommandIO {
@@ -106,12 +106,12 @@ export class CommandFormatterProvider extends Singleton {
 	}
 
 	private formatOpcodeInputArg(args: CommandArgs): string {
-		const { name, type, source } = args;
+		const { name, type } = args;
 
 		const argName = name ? this.htmlFormatColorManager.getOpcodeArgName(`{${name}}`) : '';
 		const argType = type ? this.htmlFormatColorManager.getOpcodeArgType(`[${type}]`) : '';
 
-		return [argName, argType, source].filter(Boolean).join(' ');
+		return [argName, argType].filter(Boolean).join(' ');
 	}
 
 	private formatClassInputArg(args: CommandArgs): string {
@@ -119,41 +119,37 @@ export class CommandFormatterProvider extends Singleton {
 	}
 
 	private formatOpcodeOutputArgs(output?: CommandArgs[]): string {
-		if (!output) {
-			return '';
-		}
-
-		return output.map(arg => this.formatOpcodeOutputArg(arg)).join(', ') + ' = ' || '';
+		return this.formatOutputArgs(output);
 	}
 
 	private formatClassOutputArgs(output?: CommandArgs[]): string {
-		if (!output) {
+		return this.formatOutputArgs(output);
+	}
+
+	private formatOutputArgs(output?: CommandArgs[]): string {
+		if (!output || output.length === 0) {
 			return '';
 		}
 
-		return output.map(arg => this.formatClassOutputArg(arg)).join(', ') + ' = ' || '';
+		if (output.length === 1) {
+			const { name, type } = output[0];
+			const varName = name || '0@';
+
+			if (this.isLegacyVar(varName)) {
+				return `${this.htmlFormatColorManager.getOpcodeArgName(varName)} = `;
+			}
+
+			const argType = this.htmlFormatColorManager.getOpcodeReturnVarType(type === 'float' ? 'float' : 'int');
+			const argName = this.htmlFormatColorManager.getOpcodeArgName(varName);
+
+			return `${argType} ${argName} = `;
+		}
+
+		const vars = output.map((_, i) => this.htmlFormatColorManager.getOpcodeArgName(`${i}@`)).join(', ');
+		return `${vars} = `;
 	}
 
-	private formatOpcodeOutputArg(args: CommandArgs): string {
-		const { name, type, source } = args;
-
-		const argReturnVar = source ? `${this.htmlFormatColorManager.getOpcodeReturnVarType(this.getNormalizedVar(source))} ` : '';
-		const argName = name ? this.htmlFormatColorManager.getOpcodeArgName(name + ': ') : '';
-		const argType = type ? this.htmlFormatColorManager.getOpcodeArgType(type) : '';
-
-		return `[${argReturnVar}${argName}${argType}]`;
-	}
-
-	private formatClassOutputArg(args: CommandArgs): string {
-		const { name, type } = args;
-
-		const argName = name ? this.htmlFormatColorManager.getOpcodeArgName(name) : '';
-		const argType = type ? this.htmlFormatColorManager.getOpcodeReturnVarType(`[${type}]`) : '';
-
-		return [argName, argType].filter(Boolean).join(' ');
-	}
-
-	private getNormalizedVar(source: string): string {
-		return VAR_NOTATIONS[source] || source;
+	private isLegacyVar(name: string): boolean {
+		return /^\d+@$/.test(name) || name.startsWith('$');
 	}
 }
