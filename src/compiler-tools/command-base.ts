@@ -187,6 +187,14 @@ private async getCompileTarget(): Promise<{ input: string; output: string } | un
                 return;
             }
 
+            // Los .fxt son tablas de texto GXT, no código: compilarlos no tiene
+            // sentido y sanny los rechaza. Se bloquea antes de tocar el editor.
+            if (editor.document.languageId === 'sannybuilder-fxt'
+                || path.extname(editor.document.uri.fsPath).toLowerCase() === '.fxt') {
+                vscode.window.showWarningMessage(this.t('cb.fxtNotCompilable'));
+                return;
+            }
+
             // Los diagnostics apuntan a la pestaña que el usuario ve (fuente
             // física, tab sin nombre o pestaña virtual), NO al temporal que
             // sanny compila y que la extensión borra al terminar.
@@ -263,6 +271,13 @@ private async getCompileTarget(): Promise<{ input: string; output: string } | un
         }
 
         if (!filePath) {
+            return;
+        }
+
+        // Los .fxt no se descompilan: son tablas de texto GXT, no binarios.
+        if (this.executeType === ExecuteType.DECOMPILE
+            && path.extname(filePath).toLowerCase() === '.fxt') {
+            vscode.window.showWarningMessage(this.t('cb.fxtNotDecompilable'));
             return;
         }
 

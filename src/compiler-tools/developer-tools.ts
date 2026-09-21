@@ -30,11 +30,18 @@ export class DeveloperTools extends Singleton {
             return;
         }
 
+        const vscePath = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'vsce.cmd' : 'vsce');
+        if (!await isFileExists(vscePath)) {
+            await vscode.window.showErrorMessage(this.t('dt.buildNeedVsce'));
+            return;
+        }
+
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: this.t('dt.progressTitle'),
         }, async () => {
-            const { code, output } = await this.runShell('npm run compile && vsce package', root);
+            const vsceCmd = `"${vscePath}" package`;
+            const { code, output } = await this.runShell(`npm run compile:release && ${vsceCmd}`, root);
 
             if (code === 0) {
                 const vsix = await this.findLatestVsix(root);
