@@ -2,7 +2,7 @@
     "name": "visual-builder-4",
     "displayName": "Visual Builder 4",
     "description": "Extension that replaces the editor Sanny builder 4",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "publisher": "eos-mixel",
     "author": "EOS, Mixel",
     "license": "MIT",
@@ -16,10 +16,10 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/NoPressF/sb4-vscode"
+        "url": "https://github.com/JustMixel/visual-builder4"
     },
     "bugs": {
-        "url": "https://github.com/NoPressF/sb4-vscode/issues"
+        "url": "https://github.com/JustMixel/visual-builder4/issues"
     },
     "categories": [
         "Other",
@@ -78,6 +78,10 @@
                 "title": "%command.openSettings%"
             },
             {
+                "command": "sb4.openDataFolder",
+                "title": "%command.openDataFolder%"
+            },
+            {
                 "command": "sb4.insertCoordinates",
                 "title": "%command.insertCoordinates%"
             },
@@ -120,6 +124,14 @@
             {
                 "command": "sb4.nextFxtEntry",
                 "title": "%command.nextFxtEntry%"
+            },
+            {
+                "command": "sb4.mergeCamera",
+                "title": "%command.mergeCamera%"
+            },
+            {
+                "command": "sb4.openLibrary",
+                "title": "%command.openLibrary%"
             }
         ],
 "configuration": {
@@ -167,6 +179,17 @@
                     "minimum": 0,
                     "maximum": 365,
                     "description": "%config.autosaveMaxAgeDays%"
+                },
+                "sb4.camera.mergeTime": {
+                    "type": "number",
+                    "default": 45000,
+                    "minimum": 1,
+                    "description": "%config.cameraMergeTime%"
+                },
+                "sb4.camera.mergeSmooth": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%config.cameraMergeSmooth%"
                 },
                 "sb4.colors.enabled": {
                     "type": "boolean",
@@ -280,12 +303,21 @@
                 "when": "editorTextFocus \u0026\u0026 resourceLangId == sannybuilder-fxt"
             },
             {
+                "key": "ctrl+alt+m",
+                "command": "sb4.mergeCamera",
+                "when": "editorTextFocus \u0026\u0026 resourceLangId == sannybuilder"
+            },
+            {
                 "key": "f8",
                 "command": "sb4.openGame"
             },
             {
                 "key": "f9",
                 "command": "sb4.buildVsix"
+            },
+            {
+                "key": "ctrl+alt+l",
+                "command": "sb4.openLibrary"
             }
         ],
         "languages": [
@@ -384,8 +416,9 @@
         "cleo"
     ],
     "scripts": {
-        "vscode:prepublish": "npm run compile",
+        "vscode:prepublish": "npm run compile:release",
         "compile": "tsc -p tsconfig.json \u0026\u0026 tsc-alias -p tsconfig.json",
+        "compile:release": "tsc -p tsconfig.release.json \u0026\u0026 tsc-alias -p tsconfig.release.json",
         "watch": "tsc -watch -p tsconfig.json"
     },
     "devDependencies": {
@@ -393,6 +426,7 @@
         "@types/vscode": "^1.108.1",
         "@typescript-eslint/eslint-plugin": "^8.52.0",
         "@typescript-eslint/parser": "^8.52.0",
+        "@vscode/vsce": "^4.0.0",
         "eslint": "^9.39.2",
         "typescript": "^5.9.3"
     },

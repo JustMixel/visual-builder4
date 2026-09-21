@@ -6,8 +6,14 @@ package-lock.json
 *.tsbuildinfo
 dist
 contexto-visual-builder4.md
+
+# Notas de desarrollo en markdown: ignoradas, excepto README y CHANGELOG
 *.md
-*.md
+!README.md
+!CHANGELOG.md
 
 # compilador interno de SCM/CLEO (harness, fixtures, goldens y artefactos)
 src/compiler/
+
+# script de juego del usuario (main.txt) y artefactos sueltos de .vscodeignore
+main.txt

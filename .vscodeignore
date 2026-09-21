@@ -1,0 +1,33 @@
+# ============================================================
+#  Archivos que NO se empaquetan en el VSIX (solo desarrollo).
+#  El paquete final usa dist/ compilado + assets de runtime.
+# ============================================================
+
+# Código fuente TypeScript (el runtime usa dist/ ya compilado).
+# IMPORTANTE: no excluir src/views/** (assets estáticos de webviews).
+src/**/*.ts
+src/**/*.map
+src/compiler/**
+
+# Configuración de build / lint
+tsconfig.json
+tsconfig.release.json
+eslint.config.mjs
+.gitignore
+
+# Entorno de desarrollo
+.vscode/**
+.vscode-test/**
+.github/**
+
+# Source maps y artefactos de build
+**/*.map
+**/*.tsbuildinfo
+*.vsix
+package-lock.json
+
+# Notas y scratch de desarrollo
+main.txt
+logo.jpg
+contexto-visual-builder4.md
+compilador-propio.md
