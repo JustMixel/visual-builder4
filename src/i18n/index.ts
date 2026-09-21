@@ -10,6 +10,6 @@ export function t(key: string, params?: MessageParams): string {
 }
 
 export { LocaleManager } from './locale-manager';
-export { CATALOG_INFO, CATALOGS, DEFAULT_LANGUAGE } from './catalog';
+export { CATALOG_INFO, CATALOGS, DEFAULT_LANGUAGE, ES_TEMPLATE } from './catalog';
 export type { LanguageInfo } from './locale-manager';
 export type { MessageParams } from './catalog';

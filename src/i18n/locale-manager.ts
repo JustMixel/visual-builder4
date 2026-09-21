@@ -2,7 +2,7 @@ import { Singleton, showInfoToast } from '@utils';
 import { promises as fsp } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CATALOG_INFO, CATALOGS, DEFAULT_LANGUAGE, MessageParams } from './catalog';
+import { CATALOG_INFO, CATALOGS, CATALOG_TEMPLATES, DEFAULT_LANGUAGE, MessageParams } from './catalog';
 
 export interface LanguageInfo {
 	id: string;
@@ -10,6 +10,8 @@ export interface LanguageInfo {
 	nativeName: string;
 	imported: boolean;
 	current: boolean;
+	/** true cuando otro idioma usa el mismo nombre mostrado (duplicado). */
+	duplicate?: boolean;
 }
 
 interface PersistedLanguage {
@@ -22,13 +24,15 @@ interface PersistedData {
 }
 
 const CONFIG_KEY = 'language';
-const IMPORTED_FILE = 'languages.json';
 
 /**
  * Gestión de idiomas de la UI de la extensión.
  * - Idiomas incorporados: en (base) y es.
  * - Textos exportables/importables: "VB4: Export UI Texts" / "VB4: Import
  *   UI Texts" permiten crear idiomas nuevos a partir de un JSON editable.
+ * - Los idiomas importados viven como ARCHIVOS FÍSICOS editables en
+ *   <globalStorage>/i18n/<id>.json ({ id, name, catalog }); se pueden
+ *   modificar/copiar/renombrar y se recargan en cada inicio.
  * - t(key, params) resuelve el texto del idioma activo con fallback a en.
  */
 export class LocaleManager extends Singleton {
@@ -40,16 +44,37 @@ export class LocaleManager extends Singleton {
 
 	public async init(context: vscode.ExtensionContext): Promise<void> {
 		this.context = context;
-		this.selectedId = this.sanitizeId(
+		await this.loadImported();
+
+		// Resolución de idioma: el configurado si existe → si no, inglés → si
+		// inglés tampoco existe, uno aleatorio → si no hay ninguno, la base `en`.
+		const desired = this.sanitizeId(
 			vscode.workspace.getConfiguration('sb4').get<string>(CONFIG_KEY, DEFAULT_LANGUAGE)
 		) || DEFAULT_LANGUAGE;
+		this.selectedId = this.resolveLanguageId(desired);
 
-		if (!this.isKnownId(this.selectedId)) {
-			this.selectedId = DEFAULT_LANGUAGE;
-		}
-
-		await this.loadImported();
 		this.assertCatalogsComplete();
+	}
+
+	/**
+	 * Encadena el fallback del idioma activo:
+	 * 1. el id deseado (config) si está cargado;
+	 * 2. 'en' si existe como copia física;
+	 * 3. un idioma aleatorio de los cargados (si hay);
+	 * 4. DEFAULT_LANGUAGE (base de textos en inglés, aunque no haya copia).
+	 */
+	private resolveLanguageId(desired: string): string {
+		if (this.imported.has(desired)) {
+			return desired;
+		}
+		if (this.imported.has(DEFAULT_LANGUAGE)) {
+			return DEFAULT_LANGUAGE;
+		}
+		const ids = Array.from(this.imported.keys());
+		if (ids.length > 0) {
+			return ids[Math.floor(Math.random() * ids.length)];
+		}
+		return DEFAULT_LANGUAGE;
 	}
 
 	/** Texto traducido del idioma activo, con interpolación de {params}. */
@@ -74,26 +99,29 @@ export class LocaleManager extends Singleton {
 	}
 
 	public getLanguages(): LanguageInfo[] {
-		const builtIns: LanguageInfo[] = Object.keys(CATALOGS).map(id => {
-			const info = CATALOG_INFO[id];
-			return {
-				id,
-				name: info?.name ?? id,
-				nativeName: info?.nativeName ?? id,
-				imported: false,
-				current: id === this.selectedId
-			};
-		});
-
+		// SOLO copias físicas: no hay idiomas integrados además de la base en.
 		const imported: LanguageInfo[] = Array.from(this.imported.entries()).map(([id, data]) => ({
 			id,
 			name: data.name ?? id,
 			nativeName: data.name ?? id,
 			imported: true,
 			current: id === this.selectedId
-		}));
+		})).sort((a, b) => a.nativeName.localeCompare(b.nativeName));
 
-		return [...builtIns, ...imported.sort((a, b) => a.nativeName.localeCompare(b.nativeName))];
+		// Marca como duplicado cualquier idioma posterior que comparta el mismo
+		// nombre mostrado (p. ej. dos archivos con name "Español"). El primero
+		// que aparece se considera el original; el resto, duplicados.
+		const seen = new Set<string>();
+		for (const lang of imported) {
+			const key = lang.nativeName.trim().toLowerCase();
+			if (seen.has(key)) {
+				lang.duplicate = true;
+			} else {
+				seen.add(key);
+			}
+		}
+
+		return imported;
 	}
 
 	/** Catálogo completo del idioma activo (base en + traducciones). */
@@ -138,8 +166,10 @@ export class LocaleManager extends Singleton {
 
 		const items: Array<vscode.QuickPickItem & { languageId?: string; action?: 'export' | 'import' }> = [
 			...langs.map(lang => ({
-				label: `${lang.current ? '$(check) ' : ''}${lang.nativeName}`,
-				description: lang.imported ? lang.id : this.t('meta.current'),
+				label: `${lang.current ? '$(check) ' : ''}${lang.nativeName}${lang.duplicate ? ` (${this.t('meta.duplicate', { id: lang.id })})` : ''}`,
+				description: lang.duplicate
+					? `${lang.id} · ${this.t('meta.duplicate', { id: lang.id })}`
+					: lang.imported ? lang.id : this.t('meta.current'),
 				languageId: lang.id
 			})),
 			{ label: '', kind: vscode.QuickPickItemKind.Separator },
@@ -277,7 +307,10 @@ export class LocaleManager extends Singleton {
 		const valid = Object.keys(fileTexts).length;
 		const missing = Object.keys(CATALOGS.en).filter(key => fileTexts[key] === undefined).length;
 
-		this.imported.set(id, { name: id, catalog: fileTexts });
+		const rawName = typeof parsed === 'object' && parsed !== null && (parsed as any).name
+			? String((parsed as any).name).trim()
+			: '';
+		this.imported.set(id, { name: rawName || id, catalog: fileTexts });
 		await this.saveImported();
 
 		await showInfoToast(this.t('meta.importStats', { id, valid, missing }));
@@ -332,31 +365,93 @@ export class LocaleManager extends Singleton {
 		return Object.keys(texts).length > 0 ? texts : undefined;
 	}
 
-	private async importedFilePath(): Promise<string> {
-		const dir = vscode.Uri.joinPath(this.context!.globalStorageUri, 'i18n');
-		await fsp.mkdir(dir.fsPath, { recursive: true }).catch(() => { });
-		return path.join(dir.fsPath, IMPORTED_FILE);
+	private async languagesDir(): Promise<string> {
+		const dir = path.join(this.context!.globalStorageUri.fsPath, 'i18n');
+		await fsp.mkdir(dir, { recursive: true }).catch(() => { });
+		return dir;
 	}
 
 	private async loadImported(): Promise<void> {
 		this.imported.clear();
 		this.importedLoaded = true;
 
+		const dir = await this.languagesDir();
+		await this.migrateLegacyLanguages(dir);
+
+		let entries: string[];
 		try {
-			const data = JSON.parse(await fsp.readFile(await this.importedFilePath(), 'utf-8')) as PersistedData;
-			for (const [id, lang] of Object.entries(data.languages ?? {})) {
-				if (lang && typeof lang.catalog === 'object') {
-					this.imported.set(id, lang);
-				}
-			}
+			entries = (await fsp.readdir(dir)).filter(name => name.toLowerCase().endsWith('.json'));
 		} catch {
-			// Sin idiomas importados todavía.
+			return;
+		}
+
+		let patched = false;
+		for (const entry of entries) {
+			const id = this.sanitizeId(path.basename(entry, '.json'));
+			if (!id) {
+				continue;
+			}
+			try {
+				const data = JSON.parse(await fsp.readFile(path.join(dir, entry), 'utf-8')) as Partial<PersistedLanguage>;
+				const catalog = data.catalog ?? (data as any).texts;
+				if (data && typeof catalog === 'object' && catalog !== null) {
+					// Auto-sync: las claves que el template canónico trae y que la
+					// copia no tiene todavía (actualizaciones de la extensión) se
+					// rellenan al iniciar, sin tocar las traducciones existentes.
+					const template = CATALOG_TEMPLATES[id];
+					if (template) {
+						for (const key of Object.keys(template)) {
+							if (catalog[key] === undefined) {
+								catalog[key] = template[key];
+								patched = true;
+							}
+						}
+					}
+					this.imported.set(id, {
+						name: typeof data.name === 'string' ? data.name : undefined,
+						catalog
+					});
+				}
+			} catch {
+				// Archivo malformado (editado a mano): se ignora pero no se borra.
+			}
+		}
+
+		if (patched) {
+			await this.saveImported();
+		}
+	}
+
+	/**
+	 * Convierte el blob histórico languages.json en archivos físicos por
+	 * idioma (<id>.json) y lo elimina.
+	 */
+	private async migrateLegacyLanguages(dir: string): Promise<void> {
+		const legacyPath = path.join(dir, 'languages.json');
+		try {
+			const data = JSON.parse(await fsp.readFile(legacyPath, 'utf-8')) as PersistedData;
+			for (const [id, lang] of Object.entries(data.languages ?? {})) {
+				const safeId = this.sanitizeId(id);
+				if (!safeId || !lang || typeof lang.catalog !== 'object' || lang.catalog === null) {
+					continue;
+				}
+				const payload = JSON.stringify({ id: safeId, name: lang.name ?? safeId, catalog: lang.catalog }, null, 2) + '\n';
+				await fsp.writeFile(path.join(dir, `${safeId}.json`), payload, 'utf-8');
+			}
+			await fsp.unlink(legacyPath);
+		} catch {
+			// Sin blob legacy: nada que migrar.
 		}
 	}
 
 	private async saveImported(): Promise<void> {
-		const data: PersistedData = { languages: Object.fromEntries(this.imported) };
-		await fsp.writeFile(await this.importedFilePath(), JSON.stringify(data, null, 2), 'utf-8');
+		// Un archivo físico por idioma: <globalStorage>/i18n/<id>.json
+		// ({ id, name, catalog }). Editables por el usuario.
+		const dir = await this.languagesDir();
+		for (const [id, lang] of this.imported) {
+			const payload = JSON.stringify({ id, name: lang.name ?? id, catalog: lang.catalog }, null, 2) + '\n';
+			await fsp.writeFile(path.join(dir, `${id}.json`), payload, 'utf-8');
+		}
 	}
 
 	private assertCatalogsComplete(): void {

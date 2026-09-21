@@ -7,8 +7,13 @@ export interface MessageParams {
  * extensión: mensajes, diálogos, webviews, placeholders, labels, etc.
  * Los textos con {param} se interpolan vía LocaleManager.t(key, params).
  *
- * Para agregar un idioma nuevo: crear su catálogo aquí o preparar un archivo
- * JSON con "VB4: Export UI Texts" y traducirlo.
+ * Modelo de idiomas (a partir de esta sesión): NO hay idiomas integrados
+ * además de `en`. Los idiomas viven como COPIAS FÍSICAS en
+ * <globalStorage>/i18n/<id>.json ({ id, name, texts|catálogo }); el listado
+ * del selector sale de esas copias. `en` es la base/fallback de resolución:
+ * si el idioma elegido no existe → inglés; si inglés tampoco → uno aleatorio;
+ * si no hay ninguno → se usa el catálogo base `en`. `ES_TEMPLATE` se exporta
+ * solo como plantilla de referencia para regenerar `es.json`.
  */
 const en: Record<string, string> = {
 	// --- Selector / exportación / importación de idiomas ---
@@ -39,6 +44,7 @@ const en: Record<string, string> = {
 	'meta.exportSaved': 'UI texts exported to "{path}". Edit them and use "Import UI Texts" to create a new language.',
 	'meta.languageSet': 'UI language set to {name}.',
 	'meta.current': 'current',
+	'meta.duplicate': 'duplicate ({id})',
 
 	// --- Barra de estado (selector de versión GTA) ---
 	'statusBar.tooltip': 'Open GTA Versions',
@@ -142,6 +148,7 @@ const en: Record<string, string> = {
 	'dt.compiledNoVsix': '✅ Extension compiled: no .vsix in the root.',
 	'dt.buildError': '❌ Error building the extension (code {code}):\n{details}',
 	'dt.buildNeedDevDeps': 'The build needs the dev dependencies (typescript/tsc-alias), which are only shipped in the development copy. Run F9 from the Extension Development Host (workspace), not from the installed extension.',
+	'dt.buildNeedVsce': 'The build needs the "vsce" CLI (@vscode/vsce), which is not installed in the development copy. Run "npm install" and then F9 again from the Extension Development Host (workspace).',
 	'dt.launching': '🚀 Launching {exe}.exe',
 	'dt.splashRenameFailed': '⚠️ VB4: quick load could not hide the intro videos: {reason}',
 
@@ -159,6 +166,8 @@ const en: Record<string, string> = {
 	'cb.operationCompile': 'Compiling',
 	'cb.successCompile': 'Compiling succeeded',
 	'cb.errorCompile': 'Compiling failed',
+	'cb.fxtNotCompilable': 'This .fxt file contains text entries, not code. Compilation is disabled for .fxt files.',
+	'cb.fxtNotDecompilable': 'This .fxt file contains text entries, not code. Decompiling .fxt files is disabled.',
 	'cb.operationDecompile': 'Decompiling',
 	'cb.successDecompile': 'Decompile succeeded',
 	'cb.errorDecompile': 'Decompile failed',
@@ -188,6 +197,18 @@ const en: Record<string, string> = {
 	'coords.readFail': 'Could not read the player coordinates from memory.',
 	'coords.unexpectedOutput': 'Unexpected output from the coordinates script: "{output}".',
 	'coords.runFailed': 'Failed to run the coordinates script: {message}',
+
+	// --- Fusión de movimiento de cámara (Ctrl+Alt+M) ---
+	'cm.noEditor': 'Open a script to merge camera movement (Ctrl+Alt+M).',
+	'cm.noSelection': 'Select the two camera groups (2× 015F set_camera_position + 2× 0160 point_camera) and press Ctrl+Alt+M.',
+	'cm.invalidSelection': 'The selected lines are not two camera movement groups: exactly 2× 015F and 2× 0160 are required.',
+	'cm.merged': 'Camera movement merged into 0936/0920.',
+
+	// --- Biblioteca de Sanny Builder (Ctrl+Alt+L) ---
+	'sl.noVersion': 'Notice: no GTA version selected. Opening the Sanny Builder Library home page. Select a version with "VB4: Select GTA Version" to jump to its section.',
+	'sl.unknown': 'Notice: the Sanny Builder Library has no section for the mode "{id}". Opening the library home page.',
+	'sl.opened': 'Opened the Sanny Builder Library for {game}.',
+	'sl.untrusted': 'Refusing to open the Sanny Builder Library: the URL did not match the trusted domain.',
 
 	// --- Webview de búsqueda de opcodes ---
 	'ow.panelTitle': 'Opcode Searcher',
@@ -228,10 +249,34 @@ const en: Record<string, string> = {
 	'st.retentionDesc': 'Default: 7 days. Applied the next time the extension starts.',
 	'st.clearCache': 'Clear cached files',
 	'st.statusReady': 'Ready',
-	'st.saved': 'Saved.'
+	'st.saved': 'Saved.',
+	'st.appearanceSection': 'Theme & language',
+	'st.themeLabel': 'Syntax color theme:',
+	'st.themeDefault': 'Default (extension)',
+	'st.openThemeCreator': 'Open Theme Creator',
+	'st.openThemesFolder': 'Open themes folder',
+	'st.languageLabel': 'Interface language:',
+	'st.openLanguagesFolder': 'Open languages folder',
+	'st.importLanguage': 'Import your own language',
+	'st.selectSection': 'Selection',
+	'st.selectFolderBtn': 'Select SB4 folder',
+	'st.selectVersionBtn': 'Select GTA version',
+	'st.selectGameFolderBtn': 'Select game folder',
+	'st.selectLanguageBtn': 'Select interface language',
+
+	// --- Ajustes de la extensión: funciones (webview) ---
+	'st.featuresSection': 'Features',
+	'st.featuresSectionDesc': 'Quick access to the VB4 tools.',
+	'st.openLibraryBtn': 'Open Sanny Builder Library (Ctrl+Alt+L)',
+	'st.searchOpcodesBtn': 'Search Opcodes (Ctrl+Alt+2)',
+	'st.mergeCameraBtn': 'Merge Camera Movement (Ctrl+Alt+M)',
+	'st.expandOpcodeBtn': 'Expand Opcode Number (F1)',
+	'st.insertCoordsBtn': 'Insert Player Coordinates (Ctrl+Shift+C)',
+	'st.insertAngleBtn': 'Insert Player Angle (Ctrl+Shift+E)',
+	'st.openGameBtn': 'Open Game (F8)'
 };
 
-const es: Record<string, string> = {
+export const ES_TEMPLATE: Record<string, string> = {
 	// --- Selector / exportación / importación de idiomas ---
 	'meta.selectTitle': 'VB4: Seleccionar idioma de la interfaz',
 	'meta.exportTitle': 'VB4: Exportar textos de la interfaz',
@@ -239,18 +284,18 @@ const es: Record<string, string> = {
 	'meta.languageDialogTitle': 'Seleccionar idioma de la interfaz',
 	'meta.exportDialogTitle': 'Exportar textos de la interfaz',
 	'meta.importDialogTitle': 'Importar textos de la interfaz',
-	'meta.placeholderPick': 'Elegí el idioma de la interfaz de la extensión',
+	'meta.placeholderPick': 'Elige el idioma de la interfaz de la extensión',
 	'meta.importAction': '$(arrow-down) Importar archivo de idioma…',
 	'meta.exportAction': '$(arrow-up) Exportar textos de la interfaz…',
-	'meta.exportPickPrompt': 'Elegí el idioma a exportar',
+	'meta.exportPickPrompt': 'Elige el idioma a exportar',
 	'meta.couldNotRead': 'No se pudo leer ningún archivo de textos desde esa ruta.',
 	'meta.invalidJson': 'El archivo seleccionado no es un JSON válido de textos de interfaz.',
 	'meta.invalidCatalog': 'El archivo seleccionado no tiene textos utilizables (se espera un objeto clave → texto).',
 	'meta.builtinProtected': '"{name}" es un idioma incorporado y no se puede sobrescribir.',
-	'meta.importIdPrompt': 'Escribí un ID para el idioma importado (solo letras, dígitos y guion bajo).',
+	'meta.importIdPrompt': 'Escribe un ID para el idioma importado (solo letras, dígitos y guion bajo).',
 	'meta.importDefaultId': 'personalizado',
 	'meta.idInvalid': 'El ID solo puede contener letras, dígitos y guion bajo.',
-	'meta.idExists': '"{id}" ya existe. ¿Lo sobrescribís con este archivo?',
+	'meta.idExists': '"{id}" ya existe. ¿Lo sobrescribes con este archivo?',
 	'meta.overwrite': 'Sobrescribir',
 	'meta.cancel': 'Cancelar',
 	'meta.importStats': 'Importado "{id}": {valid} textos OK, {missing} faltantes (se mostrarán en inglés).',
@@ -260,6 +305,7 @@ const es: Record<string, string> = {
 	'meta.exportSaved': 'Textos exportados a "{path}". Editarlos y usar "Importar Textos" para crear un idioma nuevo.',
 	'meta.languageSet': 'Idioma de la interfaz: {name}.',
 	'meta.current': 'actual',
+	'meta.duplicate': 'duplicado ({id})',
 
 	// --- Barra de estado (selector de versión GTA) ---
 	'statusBar.tooltip': 'Abrir versiones de GTA',
@@ -280,17 +326,17 @@ const es: Record<string, string> = {
 	'gtaVersion.loadFailed': 'No se pudieron cargar los opcodes de la versión "{label}": {error}',
 
 	// --- Colores de sintaxis ---
-	'colors.selectFolderTheme': 'Primero seleccioná una carpeta de SB4 (SB4: Select SB4 Folder) para guardar el tema personalizado.',
-	'colors.selectFolderColors': 'Primero seleccioná una carpeta de SB4 (SB4: Select SB4 Folder) para guardar los colores personalizados.',
-	'colors.selectFolderFonts': 'Primero seleccioná una carpeta de SB4 (SB4: Select SB4 Folder) para guardar los estilos de fuente personalizados.',
-	'colors.selectFolderImport': 'Primero seleccioná una carpeta de SB4 (SB4: Select SB4 Folder) para guardar el tema importado.',
+	'colors.selectFolderTheme': 'Primero selecciona una carpeta de SB4 (SB4: Select SB4 Folder) para guardar el tema personalizado.',
+	'colors.selectFolderColors': 'Primero selecciona una carpeta de SB4 (SB4: Select SB4 Folder) para guardar los colores personalizados.',
+	'colors.selectFolderFonts': 'Primero selecciona una carpeta de SB4 (SB4: Select SB4 Folder) para guardar los estilos de fuente personalizados.',
+	'colors.selectFolderImport': 'Primero selecciona una carpeta de SB4 (SB4: Select SB4 Folder) para guardar el tema importado.',
 	'colors.couldNotWriteTheme': 'No se pudo escribir el archivo de tema: {path}',
-	'colors.chooseCategory': 'Elegí la categoría de sintaxis a personalizar',
-	'colors.chooseCategoryFont': 'Elegí la categoría de sintaxis para personalizar su fuente',
+	'colors.chooseCategory': 'Elige la categoría de sintaxis a personalizar',
+	'colors.chooseCategoryFont': 'Elige la categoría de sintaxis para personalizar la fuente',
 	'colors.colorFor': 'Color para "{category}"',
 	'colors.updatedColor': 'Color de sintaxis para "{label}" actualizado.',
 	'colors.updatedFonts': 'Estilos de fuente para "{category}" actualizados.',
-	'colors.flipStylePlaceHolder': '{category}: togléá un estilo y se aplica en vivo. Elegí Finalizar para cerrar.',
+	'colors.flipStylePlaceHolder': '{category}: alterna un estilo y se aplica en vivo. Elige Finalizar para cerrar.',
 	'colors.currentlyOn': 'ACTIVO ahora (clic para cambiar)',
 	'colors.currentlyOff': 'inactivo ahora (clic para cambiar)',
 	'colors.done': '$(check-all) Finalizar',
@@ -299,7 +345,7 @@ const es: Record<string, string> = {
 	'colors.fontItalic': 'Cursiva',
 	'colors.fontUnderline': 'Subrayado',
 	'colors.fontStrikethrough': 'Tachado',
-	'colors.pickTheme': 'Elegí un tema. Se aplicará al instante.',
+	'colors.pickTheme': 'Elige un tema. Se aplicará al instante.',
 	'colors.browse': '$(folder-opened) Explorar...',
 	'colors.browseDetail': 'Cargar cualquier tema .ini',
 	'colors.pickThemeTitle': 'Seleccionar un archivo de tema de SB4 (*.ini)',
@@ -310,14 +356,14 @@ const es: Record<string, string> = {
 
 	// --- Theme Creator (webview) ---
 	'tc.panelTitle': 'VB4: Creador de temas',
-	'tc.activeSub': 'Tema activo: {file}. Editá y el preview se aplica al instante; usá Guardar para dejarlo fijo, o creá un tema nuevo desde estos cambios.',
+	'tc.activeSub': 'Tema activo: {file}. Edita y la vista previa se aplica al instante; usa Guardar para dejarlo fijo, o crea un tema nuevo desde estos cambios.',
 	'tc.previewTitle': 'Vista previa en código',
 	'tc.previewLiveBadge': 'se actualiza en vivo',
 	'tc.colCategory': 'Categoría',
 	'tc.colColor': 'Color',
 	'tc.resetTitle': 'Restablecer a valores por defecto',
 	'tc.loading': 'Cargando…',
-	'tc.ready': 'Listo. Editá y el preview se aplica al instante.',
+	'tc.ready': 'Listo. Edita y la vista previa se aplica al instante.',
 	'tc.saving': 'Guardando…',
 	'tc.savingLive': 'Guardando… (se aplica al instante)',
 	'tc.savingAs': 'Guardando como tema nuevo…',
@@ -328,7 +374,7 @@ const es: Record<string, string> = {
 	'tc.footerHint': 'Guardar actualiza el tema activo · Crear tema nuevo lo guarda aparte y lo deja activo.',
 	'tc.newThemePrompt': 'Nombre del tema nuevo (se guarda en la carpeta "themes" de SB4)',
 	'tc.newThemeValue': 'Mi Tema',
-	'tc.newThemeEmpty': 'Escribí un nombre',
+	'tc.newThemeEmpty': 'Escribe un nombre',
 	'tc.saveDialogTitle': 'Guardar el tema nuevo',
 	'tc.saveDialogLabel': 'Crear tema',
 	'tc.unknownFile': 'desconocido',
@@ -362,24 +408,27 @@ const es: Record<string, string> = {
 	'dt.vsixGenerated': '✅ VSIX generado: {file}',
 	'dt.compiledNoVsix': '✅ Extensión compilada: no hay ningún .vsix en la raíz.',
 	'dt.buildError': '❌ Error al construir la extensión (código {code}):\n{details}',
-	'dt.buildNeedDevDeps': 'El build necesita las dev dependencies (typescript/tsc-alias), que solo vienen en la copia de desarrollo. Ejecutá F9 desde el Extension Development Host (workspace), no desde la extensión instalada.',
+	'dt.buildNeedDevDeps': 'El build necesita las dev dependencies (typescript/tsc-alias), que solo vienen en la copia de desarrollo. Ejecuta F9 desde el Extension Development Host (workspace), no desde la extensión instalada.',
+	'dt.buildNeedVsce': 'El build necesita la CLI "vsce" (@vscode/vsce), que no está instalada en la copia de desarrollo. Ejecuta "npm install" y vuelve a pulsar F9 desde el Extension Development Host (workspace).',
 	'dt.launching': '🚀 Lanzando {exe}.exe',
 	'dt.splashRenameFailed': '⚠️ VB4: la carga rápida no pudo ocultar los vídeos de intro: {reason}',
 
 	// --- Carpeta del juego (F8) ---
-	'gf.notConfigured': '⚠️ VB4: no hay una carpeta de juego configurada. Usá "VB4: Select Game Folder".',
+	'gf.notConfigured': '⚠️ VB4: no hay una carpeta de juego configurada. Usa "VB4: Select Game Folder".',
 	'gf.selectLabelAction': 'Seleccionar carpeta del juego',
 	'gf.selectedOk': '✅ Carpeta del juego seleccionada (se encontró {exe}).',
 	'gf.exeMissing': 'No se encontró {exe} en esta carpeta.',
 
 	// --- Compilar / Descompilar ---
-	'cb.openScript': 'Abrí un script para compilar (F6).',
-	'cb.saveTitle': 'Elegí dónde guardar el script compilado (.scm / .cs / .cs3 / .cs4 / .s / .cm / .csa / .csi)',
+	'cb.openScript': 'Abre un script para compilar (F6).',
+	'cb.saveTitle': 'Elige dónde guardar el script compilado (.scm / .cs / .cs3 / .cs4 / .s / .cm / .csa / .csi)',
 	'cb.filterCompiled': 'Script compilado',
 	'cb.filterDecompiled': 'Scripts compilados',
 	'cb.operationCompile': 'Compilando',
 	'cb.successCompile': 'Compilación exitosa',
 	'cb.errorCompile': 'Fallo de compilación',
+	'cb.fxtNotCompilable': 'Este archivo .fxt contiene entradas de texto, no código. La compilación está deshabilitada para archivos .fxt.',
+	'cb.fxtNotDecompilable': 'Este archivo .fxt contiene entradas de texto, no código. La descompilación está deshabilitada para archivos .fxt.',
 	'cb.operationDecompile': 'Descompilando',
 	'cb.successDecompile': 'Descompilación exitosa',
 	'cb.errorDecompile': 'Fallo de descompilación',
@@ -390,40 +439,52 @@ const es: Record<string, string> = {
 	'cb.openCompiledFileFailed': 'No se pudo abrir el archivo compilado: {message}',
 	'cb.processError': 'Error del proceso: {message}',
 	'cb.readLogFailed': 'No se pudo leer el archivo de log: {message}',
-	'cb.noOutput': 'Sanny Builder no generó el archivo de salida. Verificá la carpeta de SB4 e intenta de nuevo.',
-	'cb.imgInUse': 'script.img está en uso por el juego y no se puede reemplazar. Si cambiaste un script externo, salí del juego y recompila de nuevo.',
-	'cb.keepTabInsteadOfPrompt': 'El código está a salvo en la pestaña del compilado. Cerrá la pestaña previa manualmente sin guardar.',
-	'cb.hintJumpToOffset0': 'Un salto apunta al inicio mismo de un script (offset 0). Revisá los `goto`/`jump`/`gosub` cuyo destino sea el PRIMER label de una misión/thread: ese destino queda "antes del primer comando". Agregá un comando antes del label o apuntá a un label interno.',
+	'cb.noOutput': 'Sanny Builder no generó el archivo de salida. Verifica la carpeta de SB4 e intenta de nuevo.',
+	'cb.imgInUse': 'script.img está en uso por el juego y no se puede reemplazar. Si cambiaste un script externo, sal del juego y recompila de nuevo.',
+	'cb.keepTabInsteadOfPrompt': 'El código está a salvo en la pestaña del compilado. Cierra la pestaña previa manualmente sin guardar.',
+	'cb.hintJumpToOffset0': 'Un salto apunta al inicio mismo de un script (offset 0). Revisa los `goto`/`jump`/`gosub` cuyo destino sea el PRIMER label de una misión/thread: ese destino queda "antes del primer comando". Agrega un comando antes del label o apunta a un label interno.',
 	'cb.rollbackNote': 'Se restauró el archivo compilado anterior: la compilación fallida no llegó al juego.',
 	'cb.outputChannel': 'VB4 Compile',
 
 	// --- Expand pivote de opcode (F1) ---
-	'ox.noEditor': 'Abrí un script para expandir un número de opcode (F1).',
-	'ox.noCode': 'Escribí el número del opcode (hex, ej. 009 o 0A5) y presioná F1.',
+	'ox.noEditor': 'Abre un script para expandir un número de opcode (F1).',
+	'ox.noCode': 'Escribe el número del opcode (hex, ej. 009 o 0A5) y presiona F1.',
 	'ox.notFound': 'No se encontraron opcodes que empiecen con "{code}".',
 
 	// --- Coordenadas ---
-	'coords.noGame': 'No se pudo determinar el juego de GTA a leer. Seleccioná una versión válida (SB4: Select GTA Version).',
-	'coords.notFound': "No se encontró el proceso del juego '{exe}.exe'. Iniciá el juego y reintentá.",
+	'coords.noGame': 'No se pudo determinar el juego de GTA a leer. Selecciona una versión válida (SB4: Select GTA Version).',
+	'coords.notFound': "No se encontró el proceso del juego '{exe}.exe'. Inicia el juego y reintenta.",
 	'coords.couldNotOpenProcess': "No se pudo abrir el proceso '{exe}.exe' para lectura.",
 	'coords.readFail': 'No se pudieron leer las coordenadas del jugador de la memoria.',
 	'coords.unexpectedOutput': 'Salida inesperada del script de coordenadas: "{output}".',
 	'coords.runFailed': 'No se pudo ejecutar el script de coordenadas: {message}',
 
+	// --- Fusión de movimiento de cámara (Ctrl+Alt+M) ---
+	'cm.noEditor': 'Abre un script para fusionar movimiento de cámara (Ctrl+Alt+M).',
+	'cm.noSelection': 'Selecciona los dos grupos de cámara (2× 015F set_camera_position + 2× 0160 point_camera) y pulsa Ctrl+Alt+M.',
+	'cm.invalidSelection': 'Las líneas seleccionadas no son dos grupos de movimiento de cámara: se necesitan exactamente 2× 015F y 2× 0160.',
+	'cm.merged': 'Movimiento de cámara fusionado en 0936/0920.',
+
+	// --- Biblioteca de Sanny Builder (Ctrl+Alt+L) ---
+	'sl.noVersion': 'Aviso: no hay una versión de GTA seleccionada. Abriendo la página principal de la Biblioteca de Sanny Builder. Selecciona una versión con "VB4: Select GTA Version" para ir a su sección.',
+	'sl.unknown': 'Aviso: la Biblioteca de Sanny Builder no tiene sección para el modo "{id}". Abriendo la página principal.',
+	'sl.opened': 'Abierta la Biblioteca de Sanny Builder para {game}.',
+	'sl.untrusted': 'Se rechazó abrir la Biblioteca de Sanny Builder: la URL no coincide con el dominio confiable.',
+
 	// --- Webview de búsqueda de opcodes ---
 	'ow.panelTitle': 'Buscador de opcodes',
 	'ow.title': 'Lista de opcodes',
-	'ow.chooseType': 'Elegí un tipo de búsqueda:',
+	'ow.chooseType': 'Elige un tipo de búsqueda:',
 	'ow.typeOpcodes': 'Opcodes',
 	'ow.typeClasses': 'Clases/miembros',
 	'ow.filterLabel': 'Filtrar opcodes:',
-	'ow.filterPlaceholder': 'Escribí nombre de opcode, clase, método o dirección',
+	'ow.filterPlaceholder': 'Escribe nombre de opcode, clase, método o dirección',
 	'ow.matches': 'Coincidencias: {n}',
 	'ow.noResults': 'Sin resultados',
 
 	// --- Archivos FXT (textos custom CLEO) ---
-	'fxt.corrupted': 'Este archivo .fxt contiene caracteres de reemplazo U+FFFD (se ven como "ï¿½"). Probablemente se corrompió antes al guardarlo con un encoding equivocado. Los acentos originales no se pueden recuperar automáticamente: restaurá el archivo desde un backup o re-creá las líneas afectadas.',
-	'fxt.utf8': 'Este .fxt parece un archivo UTF-8. Esta extensión abre los .fxt como Windows-1252 (ANSI) por defecto y, si lo guardás tal cual, los acentos podrían romperse. Reabrilo con UTF-8 para editarlo con seguridad.',
+	'fxt.corrupted': 'Este archivo .fxt contiene caracteres de reemplazo U+FFFD (se ven como "ï¿½"). Probablemente se corrompió antes al guardarlo con un encoding equivocado. Los acentos originales no se pueden recuperar automáticamente: restaura el archivo desde un backup o recrea las líneas afectadas.',
+	'fxt.utf8': 'Este .fxt parece un archivo UTF-8. Esta extensión abre los .fxt como Windows-1252 (ANSI) por defecto y, si lo guardas tal cual, los acentos podrían romperse. Reábrelo con UTF-8 para editarlo con seguridad.',
 	'fxt.reopenWith': 'Reabrir con Encoding',
 	'fxt.recovered': 'Se convirtió este .fxt a Windows-1252 (ANSI). Los caracteres acentuados ahora quedan guardados como los lee el juego.',
 	'fxt.nextEntryNoEntry': 'No se encontró una entrada GXT con id numérico para incrementar en o sobre el cursor.',
@@ -449,14 +510,48 @@ const es: Record<string, string> = {
 	'st.retentionDesc': 'Por defecto: 7 días. Se aplica la próxima vez que inicia la extensión.',
 	'st.clearCache': 'Vaciar caché de autoguardado',
 	'st.statusReady': 'Listo',
-	'st.saved': 'Guardado.'
+	'st.saved': 'Guardado.',
+	'st.appearanceSection': 'Tema e idioma',
+	'st.themeLabel': 'Tema de colores de sintaxis:',
+	'st.themeDefault': 'Por defecto (extensión)',
+	'st.openThemeCreator': 'Abrir creador de temas',
+	'st.openThemesFolder': 'Abrir carpeta de temas',
+	'st.languageLabel': 'Idioma de la interfaz:',
+	'st.openLanguagesFolder': 'Abrir carpeta de idiomas',
+	'st.importLanguage': 'Importar tu idioma',
+	'st.selectSection': 'Selección',
+	'st.selectFolderBtn': 'Seleccionar carpeta de SB4',
+	'st.selectVersionBtn': 'Seleccionar versión de GTA',
+	'st.selectGameFolderBtn': 'Seleccionar carpeta del juego',
+	'st.selectLanguageBtn': 'Seleccionar idioma de la interfaz',
+
+	// --- Ajustes de la extensión: funciones (webview) ---
+	'st.featuresSection': 'Funciones',
+	'st.featuresSectionDesc': 'Acceso rápido a las herramientas de VB4.',
+	'st.openLibraryBtn': 'Abrir la Biblioteca de Sanny Builder (Ctrl+Alt+L)',
+	'st.searchOpcodesBtn': 'Buscar opcodes (Ctrl+Alt+2)',
+	'st.mergeCameraBtn': 'Fusionar movimiento de cámara (Ctrl+Alt+M)',
+	'st.expandOpcodeBtn': 'Expandir número de opcode (F1)',
+	'st.insertCoordsBtn': 'Insertar coordenadas del jugador (Ctrl+Shift+C)',
+	'st.insertAngleBtn': 'Insertar ángulo del jugador (Ctrl+Shift+E)',
+	'st.openGameBtn': 'Abrir el juego (F8)'
 };
 
-export const CATALOGS: Record<string, Record<string, string>> = { en, es };
+export const CATALOGS: Record<string, Record<string, string>> = { en };
+
+/**
+ * Plantillas canónicas por idioma (solo las que trae la extensión). NO son
+ * catálogos activos/selectables: sirven SOLO para rellenar, al iniciar, las
+ * claves que falten en las copias físicas de <globalStorage>/i18n/<id>.json.
+ * Así un idioma importado nunca se queda a medias cuando el catálogo `en` (o
+ * el template) suma claves nuevas en una actualización de la extensión.
+ */
+export const CATALOG_TEMPLATES: Record<string, Record<string, string>> = {
+    es: ES_TEMPLATE
+};
 
 export const CATALOG_INFO: Record<string, { name: string; nativeName: string }> = {
-	en: { name: 'English', nativeName: 'English' },
-	es: { name: 'Spanish', nativeName: 'Español' }
+	en: { name: 'English', nativeName: 'English' }
 };
 
 export const DEFAULT_LANGUAGE = 'en';
