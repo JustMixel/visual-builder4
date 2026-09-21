@@ -1,5 +1,5 @@
 import { CommandManager, FolderManager, GameFolderManager, GtaVersionManager, LanguageManager, StorageDataManager, SyntaxColorManager } from '@managers';
-import { BaseProvider, ClassProvider, CoordsProvider, CommandFormatterProvider, DefinitionSearch, EnumProvider, FxtDiagnostics, FxtNextEntry, JumpIncludeProvider, LoopWaitDiagnostics, ModelProvider, OpcodeProvider, OpcodeExpandProvider, OpcodeTabFillProvider, OpcodesSearch, ReferenceSearch, SyntaxColoringProvider } from '@providers';
+import { BaseProvider, CameraMergeProvider, ClassProvider, CoordsProvider, CommandFormatterProvider, DefinitionSearch, EnumProvider, FxtDiagnostics, FxtNextEntry, JumpIncludeProvider, LibraryProvider, LoopWaitDiagnostics, ModelProvider, OpcodeProvider, OpcodeExpandProvider, OpcodeTabFillProvider, OpcodesSearch, ReferenceSearch, SyntaxColoringProvider } from '@providers';
 import { LocaleManager } from '@i18n';
 import * as vscode from 'vscode';
 import { CompileCommand } from './compiler-tools/compile-command';
@@ -11,6 +11,22 @@ import { VirtualDocumentProvider } from './components/virtual-document-provider.
 import { RecentFileAutosave } from './components/recent-file-autosave.component';
 import { openThemeCreator } from './components/theme-creator';
 import { openSettings } from './components/extension-settings.component';
+import { promises as fsp } from 'fs';
+
+function openDataFolder(context: vscode.ExtensionContext): void {
+	void (async () => {
+		try {
+			// Abre la carpeta de datos de la extensión (globalStorage), donde
+			// viven los temas, los idiomas importados y las cachés.
+			const dir = context.globalStorageUri.fsPath;
+			await fsp.mkdir(dir, { recursive: true });
+			await vscode.env.openExternal(vscode.Uri.file(dir));
+		} catch {
+			// Best effort: si falla, la ruta igual se muestra en los ajustes.
+			vscode.window.showInformationMessage(context.globalStorageUri.fsPath);
+		}
+	})();
+}
 
 export async function activate(context: vscode.ExtensionContext) {
     await LocaleManager.getInstance().init(context);
@@ -35,7 +51,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('sb4.selectLanguage', () => LocaleManager.getInstance().selectLanguage());
     vscode.commands.registerCommand('sb4.exportTexts', () => LocaleManager.getInstance().exportTexts());
     vscode.commands.registerCommand('sb4.importTexts', () => LocaleManager.getInstance().importTexts());
-    vscode.commands.registerCommand('sb4.openSettings', () => openSettings());
+    vscode.commands.registerCommand('sb4.openSettings', () => openSettings(context));
+    vscode.commands.registerCommand('sb4.openDataFolder', () => openDataFolder(context));
 
     JumpIncludeProvider.getInstance().register();
     LoopWaitDiagnostics.getInstance().register();
@@ -46,6 +63,8 @@ await EnumProvider.getInstance().init();
 	OpcodeProvider.getInstance().init();
 	OpcodeExpandProvider.getInstance().register();
 	OpcodeTabFillProvider.getInstance().register();
+	CameraMergeProvider.getInstance().register();
+	LibraryProvider.getInstance().register();
 	FxtNextEntry.getInstance().register();
 	FxtDiagnostics.getInstance().register();
 	await ModelProvider.getInstance().init();

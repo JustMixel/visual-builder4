@@ -1,4 +1,5 @@
 export * from './base';
+export * from './camera/camera-merge';
 export * from './class/class';
 export * from './class/completion';
 export * from './class/hover';
@@ -9,6 +10,7 @@ export * from './enum/completion';
 export * from './enum/enum';
 export * from './enum/hover';
 export * from './jump-include/jump-include';
+export * from './library/library-provider';
 export * from './model/model';
 export * from './model/completion';
 export * from './opcode/completion';
