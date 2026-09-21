@@ -41,19 +41,29 @@ export const KEYWORDS = new Set([
 // Estructuras condicionales / de decisión (if/then/else, switch/case).
 // AND/OR también van aquí: dentro de un IF (if ... and ... / or ...) deben
 // colorearse como keywordsIf, como el resto de la condición.
+//
+// Incluye también los SALTOS CONDICIONALES tanto de SA normal como de su
+// contraparte SBL (004D jump_if_false = goto_if_false = jf): una línea legacy
+// "004D: jump_if_false @LABEL" debe colorearse junto con el IF.
 export const KEYWORDS_IF = new Set([
-	'if', 'then', 'else', 'elsif', 'endif', 'end', 'and', 'or'
+	'if', 'then', 'else', 'elsif', 'endif', 'end', 'and', 'or', 'ifnot',
+	'jf', 'jump_if_false', 'goto_if_false', 'else_jump', 'goto_if_true',
+	'gosub_if_false', 'return_if_false'
 ]);
 
 // Estructuras de decisión múltiple.
 export const KEYWORDS_SWITCH = new Set([
-	'switch', 'case', 'default'
+	'switch', 'case', 'default', 'endswitch'
 ]);
 
 // Bucles y saltos de control (while/for/repeat/until + break/continue/return).
+// 'jump'/'goto' (0002), 'gosub' (0050) y las formas compuestas (whilenot,
+// endwhile, return_true/false) se colorean aquí: son saltos de control del
+// mismo bloque, tanto en SA normal como en SBL.
 export const KEYWORDS_LOOP = new Set([
 	'while', 'for', 'repeat', 'until', 'do', 'downto', 'from', 'to',
-	'break', 'continue', 'return'
+	'break', 'continue', 'return',
+	'whilenot', 'endwhile', 'jump', 'goto', 'gosub', 'return_true', 'return_false'
 ]);
 
 // Constantes booleanas.
@@ -61,35 +71,64 @@ export const KEYWORDS_BOOLEAN = new Set([
 	'true', 'false'
 ]);
 
+// Palabras reservadas ESTRUCTURALES (control de flujo): no se pueden usar
+// como nombre de variable. Deliberadamente NO se incluye el set genérico
+// KEYWORDS: esa es la lista de resaltado e incluye tipos/operadores que sanny
+// acepta igual como identificador (p.ej. "int handle" compila — handle no es
+// reservada). Una variable declarada con uno de estos nombres se marca como
+// error de diagnóstico (ver collectReservedNames).
+export const RESERVED = new Set([
+	...KEYWORDS_IF,
+	...KEYWORDS_SWITCH,
+	...KEYWORDS_LOOP,
+	...KEYWORDS_BOOLEAN
+]);
+
+const DIAGNOSTIC_SOURCE = 'SB4';
+const DIAGNOSTIC_CODE = 'reserved-variable-name';
+
 // Símbolos de programación (operadores de comparación/asignación/aritméticos).
 const symbolRe = /==|!=|>=|<=|[+\-*/<>=]/g;
 
+// Identificadores dentro de listas de nombres (constante compartida; se
+// resetea lastIndex antes de cada uso).
+const nameListRe = /[A-Za-z_]\w*/g;
+
 // Tipos de variable de SB4 y PATRONES de declaración tipada: "int 0@",
-// "float speed", bloque "var ... end" con "nombre: tipo" y "[var nombre: tipo]".
+// "float speed", "int VAR1, VAR2, VAR3" (lista coma-separada), bloque
+// "var ... end" con "nombre: tipo" y "[var nombre: tipo]".
 // El NOMBRE declarado se recuerda por documento y cada uso posterior se colorea
 // como variable (los nombres numéricos 0@/$var ya se colorean por token).
 const DECL_TYPES = '(?:int|float|double|bool|boolean|char|integer|long|short|longstring|shortstring|string|byte|word|dword|array|struct|handle)';
-// "int speed" / "float 0@" — tipo seguido del nombre. El lookahead excluye
-// keywords/tipos como falso-nombre (p. ej. "int 0@: int oneLine: int end" no
+// "int speed" / "int VAR1, VAR2, VAR3, VAR4, VAR5" — tipo seguido de UNA lista
+// de nombres separada por comas. El grupo 2 es el resto de la lista; el
+// lookahead excluye keywords/tipos como falso-nombre (p. ej. "int end" no
 // debe declarar "end").
-const DECL_TYPE_NAME_RE = new RegExp(`\\b${DECL_TYPES}\\s+(?!(?:var|end|${DECL_TYPES})\\b)([A-Za-z_]\\w*)`, 'g');
-// "  speed: int", "  speed = 0.0: float", "  speed[10]: int" — dentro de
-// bloques var ... end. El nombre puede ir seguido de un inicializador
-// (= valor, array [n]) antes del ':'. `(?:^|\s)` exige un límite previo (un
-// '$' delante → no matchea "global" de "$global"), y el lookahead rechaza
-// keywords/tipos como falso-nombre.
-const DECL_NAME_TYPE_RE = new RegExp(`(?:^|\\s)(?!(?:var|end|${DECL_TYPES})\\b)([A-Za-z_]\\w*)\\s*[^:\\n]*?:\\s*${DECL_TYPES}\\b`, 'g');
-// "[var speed: int]" — anotación de variables de la extensión.
-const DECL_BRACKET_RE = /\[var\s+([A-Za-z_]\w*)\s*:/gi;
+const DECL_TYPE_NAME_RE = new RegExp(`\\b${DECL_TYPES}\\b\\s+(?!(?:var|end|${DECL_TYPES})\\b)([A-Za-z_]\\w*)((?:\\s*,\\s*[A-Za-z_]\\w*)*)`, 'g');
+// "  speed: int", "  speed = 0.0: float", "  VAR1, VAR2 = 0 : int" — dentro de
+// bloques var ... end. Con lookahead hasta ": <tipo>", TODOS los nombres de la
+// lista (comas) se capturan; el prefijo no permite keywords/tipos como
+// falso-nombre y `(?:^|,)\s*` exige un límite previo (un '$' delante → no
+// matchea "global" de "$global").
+const DECL_NAME_TYPE_RE = new RegExp(`(?:^|[,;])\\s*(?!(?:var|end|${DECL_TYPES})\\b)([A-Za-z_]\\w*)(?=[^:\\n]*:\\s*${DECL_TYPES}\\b)`, 'g');
+// "[var speed: int]" / "[var a, b: int]" — anotación de variables de la
+// extensión (los nombres se separan por coma).
+const DECL_BRACKET_RE = /\[var\s+([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:/gi;
 
 // ~0: el análisis es incremental (por línea) y cada tecla se repinta al
 // instante; el debounce solo evita hacer trabajo redundante dentro de una
 // misma ráfaga de tipeo.
 const DEBOUNCE_MS = 16;
 
+// Cuando cambia una DECLARACIÓN tipada (int VAR1, name: int...), el conjunto
+// declarado del documento entero cambió y hay que re-clasificar otras líneas.
+// Esas tiradas se reagrupan con este debounce: tipear "int VAR1, VAR2, ..."
+// produce UNA sola re-clasificación completa en lugar de una por tecla.
+const DECLARE_DEBOUNCE_MS = 150;
+
 /**
  * Colorea la sintaxis del lenguaje SB usando un esquema de colores definido
- * por el usuario en un archivo .ini (formato krauber.ini, sección [syntax]).
+ * por el usuario en un archivo .ini de tema (sección [syntax]).
  *
  * A diferencia de la gramática TextMate (que solo colorea keywords y
  * comentarios), aquí se usan "decorations" de VS Code calculadas con el
@@ -109,6 +148,7 @@ export class SyntaxColoringProvider extends Singleton {
 	private colorManager: SyntaxColorManager = SyntaxColorManager.getInstance();
 	private decorations = new Map<string, vscode.TextEditorDecorationType>();
 	private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private declTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private paints = new Map<string, DocPaint>();
 
 	// Variables NOMBRADAS declaradas con tipo (int speed, bloque var...end,
@@ -120,6 +160,10 @@ export class SyntaxColoringProvider extends Singleton {
 	private className = new Set<string>();
 	private enumNames = new Set<string>();
 	private opcodeNames = new Set<string>();
+
+	// Errores de "variable declarada con palabra reservada" (int goto, var
+	// jf: int, [var end: int]...). Se re-setean en cada re-análisis completo.
+	private diagnosticCollection = vscode.languages.createDiagnosticCollection('sb4-reserved-name');
 
 	public async init() {
 		this.colorManager.init(this.baseProvider.context, () => { void this.reload(); });
@@ -186,12 +230,15 @@ export class SyntaxColoringProvider extends Singleton {
 
 	private registerListeners() {
 		this.baseProvider.context.subscriptions.push(
+			this.diagnosticCollection,
 			vscode.workspace.onDidOpenTextDocument(doc => this.apply(doc)),
 			vscode.workspace.onDidChangeTextDocument(event => this.scheduleIncremental(event)),
 			vscode.workspace.onDidCloseTextDocument(doc => {
 				this.clearTimer(doc.uri.toString());
+				this.clearDeclTimer(doc.uri.toString());
 				this.paints.delete(doc.uri.toString());
 				this.declaredVars.delete(doc.uri.toString());
+				this.diagnosticCollection.delete(doc.uri);
 			}),
 			vscode.window.onDidChangeActiveTextEditor(editor => {
 				if (this.isSbEditor(editor)) {
@@ -260,6 +307,29 @@ export class SyntaxColoringProvider extends Singleton {
 			clearTimeout(existing);
 			this.debounceTimers.delete(key);
 		}
+	}
+
+	private clearDeclTimer(key: string) {
+		const existing = this.declTimers.get(key);
+		if (existing) {
+			clearTimeout(existing);
+			this.declTimers.delete(key);
+		}
+	}
+
+	/**
+	 * Agrupa la re-clasificación completa tras editar una declaración: tipear
+	 * "int VAR1, VAR2, ..." dispara una sola al parar de escribir.
+	 */
+	private scheduleDeclarationRepaint(document: vscode.TextDocument, key: string) {
+		this.clearDeclTimer(key);
+		this.declTimers.set(key, setTimeout(() => {
+			this.declTimers.delete(key);
+			const paint = this.paints.get(key);
+			if (paint) {
+				this.fullRepaint(document, key);
+			}
+		}, DECLARE_DEBOUNCE_MS));
 	}
 
 	// ------------------------------------------------------------------
@@ -351,6 +421,7 @@ export class SyntaxColoringProvider extends Singleton {
 	// identifica el documento para la lista de variables declaradas (int/float).
 	private analyze(text: string, docKey: string): DocPaint {
 		this.declaredVars.set(docKey, this.collectDeclaredVars(text));
+		this.updateReservedDiagnostics(docKey, this.collectReservedNames(text));
 		const declared = this.declaredVars.get(docKey)!;
 
 		const pieces = text.split(/\r?\n/);
@@ -360,47 +431,71 @@ export class SyntaxColoringProvider extends Singleton {
 		let prevDot = false;
 
 		for (let lineIndex = 0; lineIndex < pieces.length; lineIndex++) {
-			const render = this.analyzeLine(lineIndex, pieces[lineIndex], inBlock, inBrace, prevDot, declared);
+			const render = this.analyzeLine(pieces[lineIndex], inBlock, inBrace, prevDot, declared);
 			inBlock = render.blockOut;
 			inBrace = render.braceOut;
 			prevDot = render.endsWithDot;
 			lines.push(render);
 		}
 
+		const paint: DocPaint = { lines, catRanges: new Map() };
+		this.rebuildAggregate(paint);
+		return paint;
+	}
+
+	/**
+	 * Reconstruye las ranges ABSOLUTAS (vscode.Range) a partir de los renders
+	 * por línea (rangos relativos). Ligero: no re-tokeniza; solo recoloca los
+	 * rangos sobre la grilla actual de líneas (necesario tras insertar/borrar
+	 * líneas, que desplaza el número de línea de todo lo que está debajo).
+	 */
+	private rebuildAggregate(paint: DocPaint) {
 		const catRanges = new Map<string, vscode.Range[]>();
-		for (const render of lines) {
-			for (const [category, ranges] of render.categories) {
+		const lines = paint.lines;
+		for (let li = 0; li < lines.length; li++) {
+			const render = lines[li];
+			for (const [category, rels] of render.categories) {
 				let arr = catRanges.get(category);
 				if (!arr) {
 					arr = [];
 					catRanges.set(category, arr);
 				}
-				for (const r of ranges) {
-					arr.push(r);
+				for (const rel of rels) {
+					arr.push(new vscode.Range(li, rel[0], li, rel[1]));
 				}
 			}
 		}
+		paint.catRanges = catRanges;
+	}
 
-		return { lines, texts: pieces, catRanges };
+	private absoluteRanges(lineIndex: number, rels: [number, number][]): vscode.Range[] {
+		const out: vscode.Range[] = [];
+		for (const rel of rels) {
+			out.push(new vscode.Range(lineIndex, rel[0], lineIndex, rel[1]));
+		}
+		return out;
 	}
 
 	/**
-	 * Analiza UNA línea y devuelve sus rangos por categoría + el estado de
-	 * "comentario abierto" que deja (para la siguiente línea) + si termina
-	 * en un '.'. `blockIn`/`braceIn` indican si la línea arranca DENTRO de un
-	 * comentario de bloque (/* *\/) o de llaves ({ ... }) heredado de la línea
-	 * anterior; `prevDot` si la línea anterior terminó con un punto (acceso
-	 * Text.Draw repartido en dos líneas).
+	 * Analiza UNA línea y devuelve sus rangos relativos por categoría (start/
+	 * end dentro de la línea, sin número de línea) + el estado de "comentario
+	 * abierto" que deja (para la siguiente línea) + si termina en un '.'.
+	 * `blockIn`/`braceIn` indican si la línea arranca DENTRO de un comentario
+	 * de bloque (/* *\/) o de llaves ({ ... }) heredado de la línea anterior;
+	 * `prevDot` si la línea anterior terminó con un punto (acceso Text.Draw
+	 * repartido en dos líneas). Guarda el texto y el estado de ENTRADA en el
+	 * render para poder REUTILIZARLA intacta en una edición estructural (el
+	 * estado de entrada debe coincidir de nuevo para que la reutilización sea
+	 * válida).
 	 */
 	private analyzeLine(
-		lineIndex: number,
 		lineText: string,
 		blockIn: boolean,
 		braceIn: boolean,
 		prevDot: boolean,
 		declared: Set<string>
 	): LineRender {
-		const categories = new Map<string, vscode.Range[]>();
+		const categories = new Map<string, [number, number][]>();
 		const exclusions: { start: number; end: number }[] = [];
 
 		const add = (category: string, localStart: number, localEnd: number) => {
@@ -409,7 +504,7 @@ export class SyntaxColoringProvider extends Singleton {
 				arr = [];
 				categories.set(category, arr);
 			}
-			arr.push(new vscode.Range(new vscode.Position(lineIndex, localStart), new vscode.Position(lineIndex, localEnd)));
+			arr.push([localStart, localEnd]);
 		};
 		const exclude = (localStart: number, localEnd: number) => {
 			exclusions.push({ start: localStart, end: localEnd });
@@ -612,7 +707,11 @@ export class SyntaxColoringProvider extends Singleton {
 		}
 
 		return {
+			text: lineText,
 			categories,
+			blockIn,
+			braceIn,
+			prevDotIn: prevDot,
 			blockOut,
 			braceOut,
 			endsWithDot: prev?.kind === TokenKind.Dot
@@ -794,18 +893,56 @@ export class SyntaxColoringProvider extends Singleton {
 		const names = new Set<string>();
 		const state = { block: false, brace: false };
 		const cleaned = this.commentFree(line, state);
+		for (const name of this.declaredNamesInLine(cleaned)) {
+			names.add(name);
+		}
+		for (const name of this.declaredInVarNamesInLine(cleaned)) {
+			names.add(name);
+		}
+		return names;
+	}
+
+	/**
+	 * Reúne los nombres (lowercase) declarados en una línea ya libre de
+	 * comentarios con el tipo DELANTE (tipo + lista coma-separada) y las
+	 * anotaciones [var a, b: tipo].
+	 */
+	private declaredNamesInLine(cleaned: string): string[] {
+		const names: string[] = [];
 
 		DECL_TYPE_NAME_RE.lastIndex = 0;
 		for (const m of cleaned.matchAll(DECL_TYPE_NAME_RE)) {
-			names.add(m[1].toLowerCase());
+			names.push(m[1].toLowerCase());
+			const tail = m[2] ?? '';
+			const tailNamesRe = /[A-Za-z_]\w*/g;
+			tailNamesRe.lastIndex = 0;
+			for (const t of tail.matchAll(tailNamesRe)) {
+				names.push(t[0].toLowerCase());
+			}
 		}
-		DECL_NAME_TYPE_RE.lastIndex = 0;
-		for (const m of cleaned.matchAll(DECL_NAME_TYPE_RE)) {
-			names.add(m[1].toLowerCase());
-		}
+
 		DECL_BRACKET_RE.lastIndex = 0;
 		for (const m of cleaned.matchAll(DECL_BRACKET_RE)) {
-			names.add(m[1].toLowerCase());
+			for (const n of m[1].split(',')) {
+				const name = n.trim();
+				if (name) {
+					names.push(name.toLowerCase());
+				}
+			}
+		}
+
+		return names;
+	}
+
+	/**
+	 * Nombres en el estilo "nombre [: inicializador] : <tipo>" propio del
+	 * bloque `var ... end` (incluye listas "VAR1, VAR2 = 0 : int").
+	 */
+	private declaredInVarNamesInLine(cleaned: string): string[] {
+		const names: string[] = [];
+		DECL_NAME_TYPE_RE.lastIndex = 0;
+		for (const m of cleaned.matchAll(DECL_NAME_TYPE_RE)) {
+			names.push(m[1].toLowerCase());
 		}
 		return names;
 	}
@@ -827,8 +964,9 @@ export class SyntaxColoringProvider extends Singleton {
 	/**
 	 * Barre TODO el documento y reúne los nombres de variables declaradas con
 	 * tipo. Reconoce:
-	 *  - "int speed" / "float 0@" (tipo + nombre);
-	 *  - "  speed: int" dentro de un bloque `var ... end` (incl. `0@: int = 5`);
+	 *  - "int speed" / "float 0@" / "int VAR1, VAR2, VAR3" (tipo + nombres);
+	 *  - "  speed: int" dentro de un bloque `var ... end` (incl. `0@: int = 5`,
+	 *    listas "VAR1, VAR2 = 0 : int");
 	 *  - "[var speed: int]" (anotación de esta extensión).
 	 * Respeta comentarios //, de llaves y de bloque (con estado arrastrado).
 	 */
@@ -846,20 +984,13 @@ export class SyntaxColoringProvider extends Singleton {
 				inVar = true;
 			}
 
-			DECL_TYPE_NAME_RE.lastIndex = 0;
-			for (const m of cleaned.matchAll(DECL_TYPE_NAME_RE)) {
-				names.add(m[1].toLowerCase());
-			}
-
-			DECL_BRACKET_RE.lastIndex = 0;
-			for (const m of cleaned.matchAll(DECL_BRACKET_RE)) {
-				names.add(m[1].toLowerCase());
+			for (const name of this.declaredNamesInLine(cleaned)) {
+				names.add(name);
 			}
 
 			if (inVar) {
-				DECL_NAME_TYPE_RE.lastIndex = 0;
-				for (const m of cleaned.matchAll(DECL_NAME_TYPE_RE)) {
-					names.add(m[1].toLowerCase());
+				for (const name of this.declaredInVarNamesInLine(cleaned)) {
+					names.add(name);
 				}
 			}
 
@@ -872,6 +1003,113 @@ export class SyntaxColoringProvider extends Singleton {
 	}
 
 	// ------------------------------------------------------------------
+	// Variables declaradas con palabras reservadas (diagnóstico)
+	// ------------------------------------------------------------------
+
+	/**
+	 * Marca como ERROR de diagnóstico cualquier variable declarada con un
+	 * nombre que sea una palabra reservada de SBL (int goto, "goto = 0: int",
+	 * [var jf: int]...). Los regex de declaración excluyen var/end/tipos como
+	 * falso-nombre, pero palabras como if/goto/jf/while sí entran como nombre
+	 * y no pueden usarse como variable.
+	 *
+	 * Sigue la MISMA pasada (commentFree + estado de bloques var...end) que
+	 * collectDeclaredVars, para detectar exactamente lo que el coloreo
+	 * considera una declaración.
+	 */
+	private collectReservedNames(text: string): ReservedUsage[] {
+		const usages: ReservedUsage[] = [];
+		const lines = text.split(/\r?\n/);
+		const state = { block: false, brace: false };
+		let inVar = false;
+
+		for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+			const cleaned = this.commentFree(lines[lineIndex], state);
+			const trimmed = cleaned.trim();
+
+			if (/^var\b/i.test(trimmed)) {
+				inVar = true;
+			}
+
+			this.reservedDeclaredNamesInLine(cleaned, lineIndex, usages);
+			if (inVar) {
+				this.reservedVarNamesInLine(cleaned, lineIndex, usages);
+			}
+
+			if (/\bend\b/i.test(trimmed)) {
+				inVar = false;
+			}
+		}
+
+		return usages;
+	}
+
+	private pushReserved(usages: ReservedUsage[], lineIndex: number, index: number, name: string) {
+		const word = name.toLowerCase();
+		if (RESERVED.has(word)) {
+			usages.push({ line: lineIndex, start: index, length: name.length, name: word });
+		}
+	}
+
+	/** "int NAME, NAME2..." (tipo delante) y "[var NAME: tipo]". */
+	private reservedDeclaredNamesInLine(cleaned: string, lineIndex: number, usages: ReservedUsage[]) {
+		DECL_TYPE_NAME_RE.lastIndex = 0;
+		for (const m of cleaned.matchAll(DECL_TYPE_NAME_RE)) {
+			const firstIndex = m.index + m[0].indexOf(m[1]);
+			this.pushReserved(usages, lineIndex, firstIndex, m[1]);
+
+			const tail = m[2] ?? '';
+			if (tail) {
+				const tailStart = m.index + m[0].indexOf(tail);
+				nameListRe.lastIndex = 0;
+				for (const t of tail.matchAll(nameListRe)) {
+					this.pushReserved(usages, lineIndex, tailStart + t.index, t[0]);
+				}
+			}
+		}
+
+		DECL_BRACKET_RE.lastIndex = 0;
+		for (const m of cleaned.matchAll(DECL_BRACKET_RE)) {
+			const list = m[1];
+			const listStart = m.index + m[0].indexOf(list);
+			nameListRe.lastIndex = 0;
+			for (const n of list.matchAll(nameListRe)) {
+				this.pushReserved(usages, lineIndex, listStart + n.index, n[0]);
+			}
+		}
+	}
+
+	/** "NAME [: inicializador] : tipo" dentro de bloques "var ... end". */
+	private reservedVarNamesInLine(cleaned: string, lineIndex: number, usages: ReservedUsage[]) {
+		DECL_NAME_TYPE_RE.lastIndex = 0;
+		for (const m of cleaned.matchAll(DECL_NAME_TYPE_RE)) {
+			const index = m.index + m[0].indexOf(m[1]);
+			this.pushReserved(usages, lineIndex, index, m[1]);
+		}
+	}
+
+	private updateReservedDiagnostics(docKey: string, usages: ReservedUsage[]) {
+		if (usages.length === 0) {
+			this.diagnosticCollection.delete(vscode.Uri.parse(docKey));
+			return;
+		}
+
+		const diagnostics: vscode.Diagnostic[] = [];
+		for (const u of usages) {
+			const range = new vscode.Range(u.line, u.start, u.line, u.start + u.length);
+			const diagnostic = new vscode.Diagnostic(
+				range,
+				`'${u.name}' es una palabra reservada y no puede usarse como nombre de variable.`,
+				vscode.DiagnosticSeverity.Error
+			);
+			diagnostic.code = DIAGNOSTIC_CODE;
+			diagnostic.source = DIAGNOSTIC_SOURCE;
+			diagnostics.push(diagnostic);
+		}
+		this.diagnosticCollection.set(vscode.Uri.parse(docKey), diagnostics);
+	}
+
+	// ------------------------------------------------------------------
 	// Pintado incremental (una tecla = una línea re-analizada)
 	// ------------------------------------------------------------------
 
@@ -880,7 +1118,8 @@ export class SyntaxColoringProvider extends Singleton {
 	 * una sola línea basta con re-analizar esa línea + (si cambió la
 	 * continuidad de un comentario de bloque/llaves) las siguientes hasta que
 	 * el estado se re-estabilize. Cambios estructurales (insertar/borrar
-	 * líneas, saltos de línea) caen a un análisis completo.
+	 * líneas, saltos de línea) se resuelven en incrementos: se reconstruye la
+	 * grilla reutilizando los renders de las líneas intactas.
 	 */
 	private repaintChangedDocument(event: vscode.TextDocumentChangeEvent) {
 		const document = event.document;
@@ -890,11 +1129,10 @@ export class SyntaxColoringProvider extends Singleton {
 			return;
 		}
 
-		// Cambio estructural → análisis completo y repintado total.
+		// Cambio estructural → repintado incremental (sin re-análisis completo).
 		if (document.lineCount !== paint.lines.length ||
 			event.contentChanges.some(ch => ch.range.start.line !== ch.range.end.line || /[\r\n]/.test(ch.text))) {
-			this.paints.set(key, this.analyze(document.getText(), key));
-			this.paintEditors(document.uri);
+			this.repaintStructural(event, paint);
 			return;
 		}
 
@@ -909,14 +1147,11 @@ export class SyntaxColoringProvider extends Singleton {
 
 			// Si en la línea editada cambió una DECLARACIÓN tipada (se añadió,
 			// quitó o renombró "int speed"), el nombre puede usarse en cualquier
-			// otra línea → cae a re-análisis completo (la lista declarada del
-			// documento se re-barre con la continuidad de comentarios real).
-			if (!this.sameDeclarations(paint.texts[lineIndex], document.lineAt(lineIndex).text)) {
-				this.paints.set(key, this.analyze(document.getText(), key));
-				this.paintEditors(document.uri);
-				return;
+			// otra línea → re-clasificación completa AGREGADA (una por ráfaga
+			// de tipeo), no por tecla.
+			if (!this.sameDeclarations(paint.lines[lineIndex].text, document.lineAt(lineIndex).text)) {
+				this.scheduleDeclarationRepaint(document, key);
 			}
-			paint.texts[lineIndex] = document.lineAt(lineIndex).text;
 
 			// Camina hacia adelante mientras el estado de comentarios cambie;
 			// se detiene cuando una línea re-renderizada coincide con su estado
@@ -928,10 +1163,9 @@ export class SyntaxColoringProvider extends Singleton {
 			const declared = this.declaredVars.get(key) ?? new Set<string>();
 
 			while (idx < paint.lines.length) {
-				const render = this.analyzeLine(idx, document.lineAt(idx).text, inBlock, inBrace, prevDot, declared);
+				const render = this.analyzeLine(document.lineAt(idx).text, inBlock, inBrace, prevDot, declared);
 				const stored = paint.lines[idx];
 				coveredLines.add(idx);
-				paint.texts[idx] = document.lineAt(idx).text;
 
 				// Sustituye los ranges agregados de esta línea y actualiza el
 				// estado almacenado (así el pase siguiente ve el render nuevo).
@@ -987,22 +1221,115 @@ export class SyntaxColoringProvider extends Singleton {
 			const all = paint.catRanges.get(category);
 			if (!all) {
 				if (neu.categories.get(category)) {
-					paint.catRanges.set(category, [...(neu.categories.get(category) ?? [])]);
+					paint.catRanges.set(category, this.absoluteRanges(lineIndex, neu.categories.get(category)!));
 				}
 				continue;
 			}
 			const rebuilt = all.filter(r => r.start.line !== lineIndex);
-			for (const r of neu.categories.get(category) ?? []) {
-				rebuilt.push(r);
+			for (const rel of neu.categories.get(category) ?? []) {
+				rebuilt.push(new vscode.Range(lineIndex, rel[0], lineIndex, rel[1]));
 			}
 			paint.catRanges.set(category, rebuilt);
 		}
 	}
 
+	/**
+	 * Cambio ESTRUCTURAL (insertar/borrar líneas, Enter, pegar con saltos):
+	 * reconstruye la grilla de líneas reutilizando los renders intactos
+	 * (solo se re-analizan las líneas de la región editada) y recoloca las
+	 * ranges absolutas con rebuildAggregate. Evita el re-análisis completo de
+	 * un archivo grande en cada tecla.
+	 */
+	private repaintStructural(event: vscode.TextDocumentChangeEvent, paint: DocPaint) {
+		const document = event.document;
+		const key = document.uri.toString();
+		const declared = this.declaredVars.get(key) ?? new Set<string>();
+		const oldLines = paint.lines;
+
+		const first = event.contentChanges[0];
+		const startLine = Math.min(first.range.start.line, document.lineCount - 1);
+		const checkLine = startLine;
+		const oldText = first.range.start.line < oldLines.length ? oldLines[first.range.start.line].text : undefined;
+
+		// Si la línea editada declara variables, el conjunto declarado del
+		// documento cambió → se agenda una re-clasificación completa (agrupada)
+		// y se pinta igual la región con el set actual; la completa la corrige.
+		if (oldText !== undefined && !this.sameDeclarations(oldText, document.lineAt(checkLine).text)) {
+			this.scheduleDeclarationRepaint(document, key);
+		}
+
+		const netDelta = document.lineCount - oldLines.length;
+		const newlineCount = (first.text.match(/\n/g) ?? []).length;
+		const regionNewLines = newlineCount + 1;
+
+		const newRender: (LineRender | null)[] = new Array(document.lineCount);
+		for (let i = 0; i < Math.min(startLine, oldLines.length, document.lineCount); i++) {
+			newRender[i] = oldLines[i];
+		}
+		for (let i = startLine; i < startLine + regionNewLines && i < document.lineCount; i++) {
+			newRender[i] = null;
+		}
+		for (let i = startLine + regionNewLines; i < document.lineCount; i++) {
+			const j = i - netDelta;
+			newRender[i] = j >= 0 && j < oldLines.length ? oldLines[j] : null;
+		}
+
+		let firstChanged = -1;
+		for (let i = 0; i < newRender.length; i++) {
+			if (newRender[i] === null) {
+				firstChanged = i;
+				break;
+			}
+		}
+		if (firstChanged === -1) {
+			return;
+		}
+
+		let inBlock = firstChanged > 0 ? (newRender[firstChanged - 1] as LineRender).blockOut : false;
+		let inBrace = firstChanged > 0 ? (newRender[firstChanged - 1] as LineRender).braceOut : false;
+		let prevDot = firstChanged > 0 ? (newRender[firstChanged - 1] as LineRender).endsWithDot : false;
+
+		for (let i = firstChanged; i < newRender.length; i++) {
+			const stored = newRender[i];
+			const text = document.lineAt(i).text;
+			// Reutiliza el render viejo SOLO si recibe el mismo estado de
+			// entrada que cuando se analizó y el texto coincide (la grilla
+			// desplazada lo re-validó por posición).
+			if (stored &&
+				stored.blockIn === inBlock &&
+				stored.braceIn === inBrace &&
+				stored.prevDotIn === prevDot &&
+				stored.text === text) {
+				inBlock = stored.blockOut;
+				inBrace = stored.braceOut;
+				prevDot = stored.endsWithDot;
+				continue;
+			}
+			const render = this.analyzeLine(text, inBlock, inBrace, prevDot, declared);
+			newRender[i] = render;
+			inBlock = render.blockOut;
+			inBrace = render.braceOut;
+			prevDot = render.endsWithDot;
+		}
+
+		paint.lines = newRender as LineRender[];
+		this.rebuildAggregate(paint);
+		this.paintEditors(document.uri);
+	}
+
+	private fullRepaint(document: vscode.TextDocument, key: string) {
+		this.paints.set(key, this.analyze(document.getText(), key));
+		this.paintEditors(document.uri);
+	}
+
 }
 
 interface LineRender {
-	categories: Map<string, vscode.Range[]>;
+	text: string;
+	categories: Map<string, [number, number][]>;
+	blockIn: boolean;
+	braceIn: boolean;
+	prevDotIn: boolean;
 	blockOut: boolean;
 	braceOut: boolean;
 	endsWithDot: boolean;
@@ -1010,6 +1337,12 @@ interface LineRender {
 
 interface DocPaint {
 	lines: LineRender[];
-	texts: string[];
 	catRanges: Map<string, vscode.Range[]>;
+}
+
+interface ReservedUsage {
+	line: number;
+	start: number;
+	length: number;
+	name: string;
 }

@@ -1,8 +1,6 @@
 import * as vscode from 'vscode';
 import { SyntaxColorManager } from '../managers/syntax-color-manager';
 import type { SyntaxColorStyle } from '../managers/syntax-color-manager';
-import { StorageKey } from '@utils';
-import { StorageDataManager } from '../managers/storage-data-manager';
 import { LocaleManager } from '@i18n';
 import * as path from 'path';
 
@@ -46,6 +44,9 @@ const SAMPLE_CODE: Array<Array<{ t: string; c: string }>> = [
 	[{ t: 'while', c: 'keywordsLoop' }, { t: ' true', c: 'keywordsBoolean' }],
 	[{ t: 'repeat', c: 'keywordsLoop' }, { t: ' ', c: 'plainText' }, { t: 'until', c: 'keywordsLoop' }],
 	[{ t: 'for', c: 'keywordsLoop' }, { t: ' 0@', c: 'variables' }, { t: ' to', c: 'keywordsLoop' }, { t: ' 10', c: 'numbers' }],
+	[{ t: '004D: ', c: 'plainText' }, { t: 'jump_if_false', c: 'keywordsIf' }, { t: ' @MAIN_4068', c: 'labels' }],
+	[{ t: 'jf', c: 'keywordsIf' }, { t: ' @MAIN_4068', c: 'labels' }],
+	[{ t: '0002: ', c: 'plainText' }, { t: 'goto', c: 'keywordsLoop' }, { t: ' @ROUTE_START', c: 'labels' }],
 	[{ t: '0005:', c: 'plainText' }, { t: ' $COUNTER', c: 'variables' }, { t: ' +=', c: 'symbols' }, { t: ' 1', c: 'numbers' }],
 	[{ t: '0861:', c: 'plainText' }, { t: ' 0@', c: 'variables' }, { t: ' +=', c: 'symbols' }, { t: ' offset', c: 'plainText' }, { t: ' 1', c: 'numbers' }, { t: ' 2', c: 'numbers' }, { t: ' 3', c: 'numbers' }, { t: ' ', c: 'plainText' }, { t: '90.5', c: 'numbers' }],
 	[{ t: 'load_scene ', c: 'plainText' }, { t: '"las2.img"', c: 'strings' }],
@@ -102,25 +103,11 @@ export function openThemeCreator(): void {
 				}
 
 				const safeName = name.trim().replace(/[<>:"/\\|?*]+/g, '').replace(/\s+$/g, '').trim() || t('tc.newThemeValue');
-				const folderPath = StorageDataManager.getInstance().get<string>(StorageKey.Sb4FolderPath);
-				let targetPath: string | undefined;
+				// Los temas creados/guardados van a la carpeta PROPIA de la
+				// extensión (globalStorage), nunca a la de Sanny Builder.
+				const targetPath = path.join(manager.getExtensionThemesDir(), `${safeName}.ini`);
 
-				if (folderPath) {
-					targetPath = path.join(folderPath, 'themes', `${safeName}.ini`);
-				} else {
-					const uri = await vscode.window.showSaveDialog({
-						title: t('tc.saveDialogTitle'),
-						filters: { 'INI theme': ['ini'] },
-						saveLabel: t('tc.saveDialogLabel')
-					});
-					targetPath = uri ? uri.fsPath : undefined;
-				}
-
-				if (!targetPath) {
-					return;
-				}
-
-				const ok = await manager.saveThemeAs(message.styles!, targetPath);
+				const ok = await manager.saveThemeAs(message.styles!, targetPath, name.trim());
 				panel.webview.postMessage({ command: 'status', ok, file: ok ? path.basename(targetPath) : undefined } as ThemeMessage);
 			})();
 		}

@@ -3,7 +3,7 @@
     "name": "SB",
     "patterns": [
         {
-            "match": "(?i)\\b(and|array|as|alloc|boolean|bool|break|case|cdecl|class|const|continue|dec|define|default|div|downto|else|end|enum|export|false|float|for|from|function|handle|hex|if|import|inc|int|integer|logical|longstring|mul|not|of|optional|or|random|readmem|repeat|return|shortstring|string|stdcall|sqr|switch|then|thiscall|to|true|unknown|until|var|while|writemem)\\b",
+            "match": "(?i)\\b(and|array|as|alloc|boolean|bool|break|case|cdecl|class|const|continue|dec|define|default|div|downto|else|elsif|else_jump|end|endif|endswitch|endwhile|enum|export|false|float|for|from|function|gosub|gosub_if_false|goto|goto_if_false|goto_if_true|handle|hex|if|ifnot|import|inc|int|integer|jf|jump|jump_if_false|logical|longstring|mul|not|of|optional|or|random|readmem|repeat|return|return_false|return_if_false|return_true|shortstring|string|stdcall|sqr|switch|then|thiscall|to|true|unknown|until|var|whilenot|while|writemem)\\b",
             "name": "operator.sb"
         },
         {

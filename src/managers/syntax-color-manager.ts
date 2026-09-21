@@ -1,4 +1,4 @@
-import { Singleton, StorageKey, showInfoToast } from '@utils';
+import { Singleton, StorageKey, isFileExists, showInfoToast } from '@utils';
 import { promises as fsp } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -42,7 +42,7 @@ export function categoryDisplayName(category: string): string {
 const BOOLEAN_TRUE = new Set(['1', 'true', 'yes', 'on']);
 
 /**
- * Convierte el valor de color de un .ini estilo krauber.ini a un hex #RRGGBB.
+ * Convierte el valor de color de un .ini (sección [syntax]) a un hex #RRGGBB.
  * Soporta dos formatos:
  *  - Entero: 0xRRGGBB tal como lo usa Sanny Builder 4 (ej: 12632256 -> #C0C0C0).
  *  - Hex literal: "#C0C0C0".
@@ -71,11 +71,11 @@ export function parseColorValue(value: string): string | undefined {
 }
 
 /**
- * Lee los colores de sintaxis desde un archivo .ini con el formato de
- * krauber.ini (sección [syntax]) y los expone por categoría. El color de
- * cada categoría es configurable por el usuario: basta con apuntar
- * sb4.colors.iniPath a su archivo (o dejar que se auto-detecte
- * <carpeta SB4>/krauber.ini).
+ * Lee los colores de sintaxis desde un archivo .ini con la sección [syntax]
+ * y los expone por categoría. Los temas viven en la carpeta de temas de la
+ * extensión (<globalStorage>/themes): `vb4-colors.ini` es el tema por
+ * defecto (opción "Por defecto (extensión)"), y el resto de .ini son temas
+ * creados/importados. El archivo activo se configura con sb4.colors.iniPath.
  */
 export class SyntaxColorManager extends Singleton {
 	private storageDataManager: StorageDataManager = StorageDataManager.getInstance();
@@ -85,11 +85,137 @@ export class SyntaxColorManager extends Singleton {
 	private reloading = false;
 	private onChange?: () => void;
 	private extensionPath = '';
+	private globalStoragePath = '';
 	private t = (key: string, params?: Record<string, string>) => LocaleManager.getInstance().t(key, params);
 
 	public init(context: vscode.ExtensionContext, onChange?: () => void) {
 		this.extensionPath = context.extensionUri.fsPath;
+		this.globalStoragePath = context.globalStorageUri.fsPath;
 		this.onChange = onChange;
+
+		// Asegura el tema por defecto (vb4-colors.ini) y migra el tema personal
+		// legacy (sb4-colors.ini) a un archivo de tema propio.
+		void this.migrateLegacyColorsIni();
+	}
+
+	/**
+	 * Carpeta de temas de la extensión (globalStorage/themes): aquí viven el
+	 * tema por defecto (vb4-colors.ini) y los temas creados/importados por el
+	 * usuario. La extensión nunca escribe en la carpeta de Sanny Builder.
+	 */
+	public getExtensionThemesDir(): string {
+		return path.join(this.globalStoragePath, 'themes');
+	}
+
+	/**
+	 * Devuelve la ruta de un archivo dentro de la carpeta de temas del global
+	 * storage, creando la carpeta si hace falta.
+	 */
+	private async ensureFileInThemesDir(fileName: string): Promise<string> {
+		const dir = this.getExtensionThemesDir();
+		await fsp.mkdir(dir, { recursive: true });
+		return path.join(dir, fileName);
+	}
+
+	/**
+	 * Migración best-effort al iniciar:
+	 *  1. Asegura el tema por defecto `<globalStorage>/themes/vb4-colors.ini`
+	 *     (los colores por defecto de la extensión; se siembra desde el .ini
+	 *     de ejemplo incluido si no existe).
+	 *  2. Versiones viejas guardaban el tema personal como `sb4-colors.ini`
+	 *     (en la carpeta de SB4 o en la de la extensión). Ese archivo NO es el
+	 *     por defecto: se conserva como tema creado (carpeta de temas), se
+	 *     borra el original y se reconfigura colors.iniPath si apuntaba ahí.
+	 */
+	private async migrateLegacyColorsIni() {
+		try {
+			await this.ensureDefaultTheme();
+
+			const configured = vscode.workspace.getConfiguration('sb4').get<string>('colors.iniPath')?.trim();
+			let legacyPath: string | undefined;
+
+			if (configured && path.basename(configured).toLowerCase() === 'sb4-colors.ini') {
+				legacyPath = configured;
+			} else {
+				const candidate = path.join(this.getExtensionThemesDir(), 'sb4-colors.ini');
+				if (await isFileExists(candidate)) {
+					legacyPath = candidate;
+				}
+			}
+
+			if (legacyPath && (await isFileExists(legacyPath))) {
+				const preserved = await this.preserveLegacyTheme(legacyPath);
+				if (configured === legacyPath) {
+					await this.configureIniPath(preserved);
+				}
+			}
+		} catch {
+			// Migración best-effort: ante cualquier error se conserva lo existente.
+		}
+	}
+
+	/** Asegura que existe el tema por defecto (vb4-colors.ini). */
+	private async ensureDefaultTheme() {
+		const target = this.getDefaultThemePath();
+		if (await isFileExists(target)) {
+			return;
+		}
+
+		const example = path.join(this.extensionPath, 'syntax', 'sb-colors.ini');
+		try {
+			if (await isFileExists(example)) {
+				await fsp.copyFile(example, target);
+				return;
+			}
+		} catch {
+			// Se cae al esqueleto mínimo.
+		}
+		await fsp.writeFile(target, '; VB4 - Default syntax colors\n[syntax]\n', 'utf-8');
+	}
+
+	/**
+	 * Conserva un tema legacy (sb4-colors.ini) como tema creado en la carpeta
+	 * de temas y devuelve su nueva ruta. Nunca se usa como tema por defecto.
+	 */
+	private async preserveLegacyTheme(legacyPath: string): Promise<string> {
+		let content = '';
+		try {
+			content = await fsp.readFile(legacyPath, 'utf-8');
+		} catch {
+			content = '';
+		}
+
+		const header = /;\s*Converted from SB4 theme:\s*([\w. -]+)/i.exec(content);
+		const base =
+			this.themeDisplayName(content) || (header ? path.basename(header[1], '.ini') : '') || 'Custom Theme';
+
+		const target = await this.uniqueThemeTargetPath(base);
+		await fsp.copyFile(legacyPath, target);
+		await fsp.unlink(legacyPath).catch(() => {});
+		return target;
+	}
+
+	/**
+	 * Ruta única para un tema nuevo dentro de la carpeta de temas. Nunca
+	 * choca con el tema por defecto vb4-colors.ini ni con archivos existentes.
+	 */
+	private async uniqueThemeTargetPath(baseName: string): Promise<string> {
+		const dir = this.getExtensionThemesDir();
+		await fsp.mkdir(dir, { recursive: true });
+
+		let safe = baseName.trim().replace(/[<>:"/\\|?*]+/g, '').replace(/[.\s]+$/g, '');
+		if (!safe || safe.toLowerCase() === 'vb4-colors') {
+			safe = 'Custom Theme';
+		}
+
+		let target = path.join(dir, `${safe}.ini`);
+		let n = 2;
+		while (await isFileExists(target)) {
+			target = path.join(dir, `${safe} [${n}].ini`);
+			n += 1;
+		}
+
+		return target;
 	}
 
 	public async reload() {
@@ -182,11 +308,17 @@ export class SyntaxColorManager extends Singleton {
 
 	/**
 	 * Guarda el tema actual como un archivo nuevo (tema independiente) y lo
-	 * deja activo. Devuelve true si salió bien.
+	 * deja activo. El archivo incluye la sección [meta] con su nombre visual.
+	 * Devuelve true si salió bien.
 	 */
-	public async saveThemeAs(styles: Record<string, SyntaxColorStyle>, targetPath: string): Promise<boolean> {
+	public async saveThemeAs(styles: Record<string, SyntaxColorStyle>, targetPath: string, themeName?: string): Promise<boolean> {
+		// El tema por defecto nunca se sobrescribe desde "Guardar como".
+		if (path.basename(targetPath).toLowerCase() === 'vb4-colors.ini') {
+			targetPath = await this.uniqueThemeTargetPath(themeName || 'Custom Theme');
+		}
+
 		try {
-			await fsp.writeFile(targetPath, this.buildThemeContent(styles), 'utf-8');
+			await fsp.writeFile(targetPath, this.buildThemeContent(styles, themeName), 'utf-8');
 		} catch {
 			await vscode.window.showErrorMessage(this.t('colors.couldNotWriteTheme', { path: targetPath }));
 			return false;
@@ -209,12 +341,137 @@ export class SyntaxColorManager extends Singleton {
 		return iniPath ? path.basename(iniPath) : 'none';
 	}
 
-	private buildThemeContent(styles: Record<string, SyntaxColorStyle>): string {
+	/**
+	 * Tema por defecto de la extensión: <globalStorage>/themes/vb4-colors.ini
+	 * (se siembra desde el ejemplo incluido la primera vez). La opción
+	 * "Por defecto (extensión)" resuelve siempre a esta ruta.
+	 */
+	public getDefaultThemePath(): string {
+		return path.join(this.getExtensionThemesDir(), 'vb4-colors.ini');
+	}
+
+	/**
+	 * Lista los temas guardados en la carpeta propia de la extensión
+	 * (<globalStorage>/themes/*.ini, EXCEPTO el tema por defecto
+	 * vb4-colors.ini) con su nombre visual de la sección [meta] name. Si el
+	 * nombre no es válido se asigna "Visual Basic 4 Custom Theme [n]" (único)
+	 * y se escribe de vuelta en el archivo para que quede fijo y editable.
+	 */
+	public async listExtensionThemes(): Promise<Array<{ path: string; label: string }>> {
+		const dir = this.getExtensionThemesDir();
+		let files: string[];
+		try {
+			files = (await fsp.readdir(dir))
+				.filter(file => file.toLowerCase().endsWith('.ini') && file.toLowerCase() !== 'vb4-colors.ini')
+				.sort((a, b) => a.localeCompare(b));
+		} catch {
+			return [];
+		}
+
+		// Primera pasada: resolver los nombres ya válidos de [meta] y recordar
+		// cuáles necesitan uno. Los que ya tienen nombre ocupan su etiqueta.
+		const needsName: Array<{ filePath: string; content: string }> = [];
+		const used = new Set<string>();
+		const themes: Array<{ path: string; label: string }> = [];
+		for (const file of files) {
+			const filePath = path.join(dir, file);
+			let label = path.basename(file, '.ini');
+			try {
+				const content = await fsp.readFile(filePath, 'utf-8');
+				const metaName = this.themeDisplayName(content);
+				if (metaName && metaName.trim()) {
+					label = metaName.trim();
+				} else {
+					needsName.push({ filePath, content });
+				}
+			} catch {
+				// Nombre del archivo como fallback.
+			}
+			used.add(label.toLowerCase());
+			themes.push({ path: filePath, label });
+		}
+
+		// Segunda pasada: los archivos sin [meta] válido reciben el nombre por
+		// defecto, con la primera iteración libre que no colisione con ningún
+		// nombre ya presente.
+		for (const item of needsName) {
+			let n = 1;
+			let candidate = this.defaultThemeName(n);
+			while (used.has(candidate.toLowerCase())) {
+				n += 1;
+				candidate = this.defaultThemeName(n);
+			}
+			await fsp.writeFile(item.filePath, this.injectMetaName(item.content, candidate), 'utf-8');
+			used.add(candidate.toLowerCase());
+			const theme = themes.find(t => t.path === item.filePath);
+			if (theme) {
+				theme.label = candidate;
+			}
+		}
+
+		return themes;
+	}
+
+	/** Nombre por defecto para un tema sin nombre válido en [meta]. */
+	private defaultThemeName(iteration: number): string {
+		return `Visual Basic 4 Custom Theme [${iteration}]`;
+	}
+
+	/** Asegura un parámetro "name" válido en la sección [meta] del contenido. */
+	private injectMetaName(content: string, name: string): string {
+		const lines = content.split(/\r?\n/);
+		let metaHeaderIndex = -1;
+		let inMeta = false;
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i].trim();
+			if (line.startsWith('[') && line.endsWith(']')) {
+				inMeta = line.slice(1, -1).trim().toLowerCase() === 'meta';
+				if (inMeta && metaHeaderIndex === -1) {
+					metaHeaderIndex = i;
+				}
+				continue;
+			}
+			if (inMeta) {
+				const eq = line.indexOf('=');
+				if (eq > 0 && line.slice(0, eq).trim().toLowerCase() === 'name') {
+					lines[i] = `name=${name}`;
+					return lines.join('\n');
+				}
+			}
+		}
+		if (metaHeaderIndex !== -1) {
+			lines.splice(metaHeaderIndex + 1, 0, `name=${name}`);
+			return lines.join('\n');
+		}
+		return `[meta]\nname=${name}\n${content}`;
+	}
+
+	/**
+	 * Activa un tema del selector: sin filePath (o '') se usa el tema por
+	 * defecto de la extensión (el ejemplo incluido); con filePath se apunta
+	 * colors.iniPath a ese archivo (tema guardado en la carpeta propia).
+	 */
+	public async selectTheme(filePath?: string): Promise<boolean> {
+		try {
+			await this.configureIniPath(filePath ? filePath : this.getDefaultThemePath());
+			await this.reload();
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	private buildThemeContent(styles: Record<string, SyntaxColorStyle>, themeName?: string): string {
 		const lines: string[] = [
 			'; VB4 Theme Creator - colores de sintaxis personalizados',
-			'; Generado por "VB4: Theme Creator". Editalo a mano si quieres.',
-			'[syntax]'
+			'; Generado por "VB4: Theme Creator". Editalo a mano si quieres.'
 		];
+
+		if (themeName && themeName.trim()) {
+			lines.push('[meta]', `name=${themeName.trim()}`);
+		}
+
+		lines.push('[syntax]');
 
 		for (const category of this.getCategories()) {
 			const style = styles[category] ?? {};
@@ -281,8 +538,8 @@ export class SyntaxColorManager extends Singleton {
 	}
 
 	/**
-	 * Si el archivo objetivo no existe, se crea partiendo del INI activo
-	 * (krauber.ini o el ejemplo incluido) para no perder los colores ya
+	 * Si el archivo objetivo no existe, se crea partiendo del tema activo
+	 * (el archivo actual o el ejemplo incluido) para no perder los colores ya
 	 * configurados en las categorías que no se tocan.
 	 */
 	private async ensureFileExists(iniPath: string) {
@@ -331,12 +588,9 @@ export class SyntaxColorManager extends Singleton {
 			return configured;
 		}
 
-		const folderPath = this.storageDataManager.get<string>(StorageKey.Sb4FolderPath);
-		if (!folderPath) {
-			return undefined;
-		}
-
-		return path.join(folderPath, 'sb4-colors.ini');
+		// Sin una ruta configurada se edita el tema por defecto de la extensión
+		// (vb4-colors.ini, en su carpeta globalStorage), nunca en SB4.
+		return this.ensureFileInThemesDir('vb4-colors.ini');
 	}
 
 	private async configureIniPath(iniPath: string) {
@@ -493,8 +747,9 @@ export class SyntaxColorManager extends Singleton {
 	/**
 	 * Importa un tema de Sanny Builder 4 (E:\...\themes\*.ini): resuelve los
 	 * colores de la sección [syntax] (decimal, 0x..., #hex y referencias a la
-	 * sección [variables]) y los convierte a un .ini con el formato propio de
-	 * la extensión (sb4-colors.ini), quedando activo de inmediato.
+	 * sección [variables]) y los adapta a la plantilla interna de categorías.
+	 * Se guarda como tema nuevo en la carpeta de temas de la extensión y queda
+	 * activo de inmediato (sin tocar el tema por defecto vb4-colors.ini).
 	 */
 	public async importTheme(): Promise<void> {
 		// Se lee el .ini elegido, se adapta y se refresca de inmediato. No hay
@@ -548,11 +803,10 @@ export class SyntaxColorManager extends Singleton {
 			return;
 		}
 
-		const iniPath = await this.ensureEditableIniPath();
-		if (!iniPath) {
-			await vscode.window.showErrorMessage(this.t('colors.selectFolderImport'));
-			return;
-		}
+		// Se guarda como TEMA NUEVO en la carpeta de temas de la extensión
+		// (nunca sobreescribe el tema por defecto vb4-colors.ini).
+		const baseName = this.themeDisplayName(content) || path.basename(filePath, '.ini');
+		const iniPath = await this.uniqueThemeTargetPath(baseName);
 
 		await fsp.writeFile(iniPath, converted, 'utf-8');
 
@@ -561,7 +815,7 @@ export class SyntaxColorManager extends Singleton {
 		}
 
 		await this.reload();
-		await showInfoToast(this.t('colors.themeImported', { name: path.basename(filePath) }));
+		await showInfoToast(this.t('colors.themeImported', { name: path.basename(iniPath) }));
 	}
 
 	/**
@@ -629,8 +883,8 @@ export class SyntaxColorManager extends Singleton {
 	}
 
 	/**
-	 * Resuelve la prioridad de archivos: configurado por el usuario, tema por
-	 * defecto de SB4 (<carpeta>\krauber.ini) y el ejemplo incluido.
+	 * Adapta un tema SB4 al formato interno de la extensión: lee la sección
+	 * [syntax] del archivo elegido (solo lectura, nunca se escribe en SB4).
 	 */
 	private convertTheme(filePath: string, content: string): string | undefined {
 		const variables = new Map<string, string>();
@@ -742,17 +996,22 @@ export class SyntaxColorManager extends Singleton {
 		return aliases[rawCategory.toLowerCase()];
 	}
 
+	/**
+	 * Resuelve la prioridad de archivos de tema: 1) colors.iniPath si está
+	 * configurado, 2) el tema por defecto de la extensión (vb4-colors.ini en
+	 * su carpeta globalStorage), 3) como último recurso (solo lectura) el
+	 * ejemplo de sintaxis incluido con la extensión.
+	 */
 	private resolveCandidates(): string[] {
 		const configured = vscode.workspace.getConfiguration('sb4').get<string>('colors.iniPath')?.trim();
-		const folderPath = this.storageDataManager.get<string>(StorageKey.Sb4FolderPath);
 
 		const candidates: string[] = [];
 		if (configured) {
 			candidates.push(configured);
 		}
-		if (folderPath) {
-			candidates.push(path.join(folderPath, 'krauber.ini'));
-		}
+		// El tema por defecto de la extensión (vb4-colors.ini).
+		candidates.push(this.getDefaultThemePath());
+		// Último recurso: el ejemplo incluido (solo de lectura).
 		candidates.push(path.join(this.extensionPath, 'syntax', 'sb-colors.ini'));
 
 		return candidates;

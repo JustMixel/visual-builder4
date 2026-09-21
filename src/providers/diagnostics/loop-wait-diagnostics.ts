@@ -39,6 +39,9 @@ export class LoopWaitDiagnostics extends Singleton {
     private baseProvider: BaseProvider = BaseProvider.getInstance();
     private collection!: vscode.DiagnosticCollection;
     private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    // Contador de "generación": si llega un cambio nuevo mientras se analiza,
+    // el análisis en curso se aborta y el nuevo programa se corre con prio.
+    private generation = 0;
 
     public register() {
         this.collection = vscode.languages.createDiagnosticCollection('sb4-loop-wait');
@@ -46,7 +49,7 @@ export class LoopWaitDiagnostics extends Singleton {
 
         vscode.workspace.textDocuments
             .filter(doc => doc.languageId === CONFIG.LANGUAGE_SELECTOR.language)
-            .forEach(doc => this.analyze(doc));
+            .forEach(doc => void this.analyze(doc));
 
         this.baseProvider.context.subscriptions.push(
             vscode.workspace.onDidOpenTextDocument(doc => this.scheduleAnalyze(doc)),
@@ -68,7 +71,7 @@ export class LoopWaitDiagnostics extends Singleton {
 
         this.debounceTimers.set(key, setTimeout(() => {
             this.debounceTimers.delete(key);
-            this.analyze(document);
+            void this.analyze(document);
         }, DEBOUNCE_MS));
     }
 
@@ -80,54 +83,79 @@ export class LoopWaitDiagnostics extends Singleton {
         }
     }
 
-    private analyze(document: vscode.TextDocument) {
-        // Se usa una instancia nueva (no getInstance()) a propósito: el
-        // Tokenizer es un Singleton que acumula tokens de llamadas previas
-        // en su array interno si se reutiliza la misma instancia.
-        const tokens = new Tokenizer().tokenize(document.getText());
+    /**
+     * Análisis por CHUNKS: procesa el documento línea a línea y cede al event
+     * loop cada ~1024 líneas, para que el coloreo (debounce 16 ms) no quede
+     * bloqueado mientras se escanea un archivo grande. Si aparece un cambio
+     * más nuevo (debounce se re-dispara), este pase se descarta al instante.
+     */
+    private async analyze(document: vscode.TextDocument) {
+        const gen = ++this.generation;
         const diagnostics: vscode.Diagnostic[] = [];
         const stack: BlockFrame[] = [];
+        const lines = document.getText().split(/\r?\n/);
 
-        for (const token of tokens) {
-            if (token.kind !== TokenKind.Identifier) {
-                continue;
+        for (let i = 0; i < lines.length; i++) {
+            if (this.generation !== gen) {
+                return;
             }
-
-            const word = token.text.toLowerCase();
-
-            if (word === 'wait') {
-                for (const frame of stack) {
-                    frame.sawWait = true;
+            const tokens = new Tokenizer().tokenize(lines[i]);
+            for (const token of tokens) {
+                // El Tokenizer por-línea reporta "línea 1" siempre; se corrige
+                // el número de línea absoluto para el diagnostic.
+                token.line = i + 1;
+                if (token.kind !== TokenKind.Identifier) {
+                    continue;
                 }
-                continue;
+                this.consume(token, stack, diagnostics);
             }
-
-            if (word === REPEAT_BLOCK || NESTED_END_BLOCKS.has(word)) {
-                stack.push({ type: word, token, sawWait: false });
-                continue;
-            }
-
-            if (word === 'until') {
-                const top = stack[stack.length - 1];
-                if (top?.type === REPEAT_BLOCK) {
-                    stack.pop();
-                    if (!top.sawWait) {
-                        diagnostics.push(this.buildDiagnostic(top));
-                    }
-                }
-                continue;
-            }
-
-            if (word === 'end') {
-                const top = stack.pop();
-                if (top && LOOP_BLOCKS.has(top.type) && !top.sawWait) {
-                    diagnostics.push(this.buildDiagnostic(top));
-                }
-                continue;
+            if ((i & 1023) === 1023) {
+                await this.yieldToEventLoop();
             }
         }
 
-        this.collection.set(document.uri, diagnostics);
+        if (this.generation === gen) {
+            this.collection.set(document.uri, diagnostics);
+        }
+    }
+
+    private yieldToEventLoop(): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    private consume(token: Token, stack: BlockFrame[], diagnostics: vscode.Diagnostic[]) {
+        const word = token.text.toLowerCase();
+
+        if (word === 'wait') {
+            for (const frame of stack) {
+                frame.sawWait = true;
+            }
+            return;
+        }
+
+        if (word === REPEAT_BLOCK || NESTED_END_BLOCKS.has(word)) {
+            stack.push({ type: word, token, sawWait: false });
+            return;
+        }
+
+        if (word === 'until') {
+            const top = stack[stack.length - 1];
+            if (top?.type === REPEAT_BLOCK) {
+                stack.pop();
+                if (!top.sawWait) {
+                    diagnostics.push(this.buildDiagnostic(top));
+                }
+            }
+            return;
+        }
+
+        if (word === 'end') {
+            const top = stack.pop();
+            if (top && LOOP_BLOCKS.has(top.type) && !top.sawWait) {
+                diagnostics.push(this.buildDiagnostic(top));
+            }
+            return;
+        }
     }
 
     private buildDiagnostic(frame: BlockFrame): vscode.Diagnostic {
